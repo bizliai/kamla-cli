@@ -26,7 +26,7 @@ View the full documentation at **[bizliai.github.io/kamla-cli](https://bizliai.g
 - 💬 **Interactive Chat**: Pair-program with the agent in a real-time terminal interface.
 - 🛡️ **Multi-level Sandboxing**: Control what the agent can do with `read-only`, `restricted`, and `full` access modes.
 - 🛠️ **Custom Skills**: Extend the agent's capabilities with dynamic tools installed via Git or local scripts.
-- ⚙️ **Provider Agnostic**: Support for OpenAI, OpenCode, and other LLM providers.
+- ⚙️ **Provider Agnostic**: Support for OpenAI, Anthropic, Gemini, and other LLM providers.
 
 - 🚀 **Built for Developers**: Fast, lightweight, and written in TypeScript.
 - 🔒 **Security First**: Configurable command blocklists and manual approval workflows.

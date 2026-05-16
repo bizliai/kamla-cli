@@ -71,7 +71,7 @@ export class Agent {
 
 
   private getDefaultSystemPrompt(): string {
-    return `You are an autonomous coding agent. Your job is to help the user accomplish programming tasks.
+    return `You are Kamla, an autonomous coding agent. Your job is to help the user accomplish programming tasks.
 
 Available tools:
 - shell: Execute shell commands

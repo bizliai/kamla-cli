@@ -11,7 +11,7 @@ export interface ProviderConfig {
   name: string;
   id: string;
   apiEndpoint?: string;
-  model: string;
+  model?: string;
   models?: string[];
 }
 
@@ -19,33 +19,22 @@ export const PROVIDERS: ProviderConfig[] = [
   {
     name: "Google Gemini",
     id: "google",
-    model: "google/gemini-1.5-pro",
-    models: ["google/gemini-1.5-pro", "google/gemini-1.5-flash", "google/gemini-2.0-flash-exp"],
   },
   {
     name: "OpenAI",
     id: "openai",
-    model: "openai/gpt-4o",
-    models: ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-3.5-turbo"],
   },
   {
     name: "Anthropic",
     id: "anthropic",
-    model: "anthropic/claude-3-5-sonnet-20240620",
-    models: ["anthropic/claude-3-5-sonnet-20240620", "anthropic/claude-3-opus-20240229", "anthropic/claude-3-haiku-20240307"],
   },
-
   {
     name: "Mistral",
     id: "mistral",
-    model: "mistral/mistral-large-latest",
-    models: ["mistral/mistral-large-latest", "mistral/mistral-small-latest"],
   },
   {
     name: "Groq",
     id: "groq",
-    model: "groq/llama3-70b-8192",
-    models: ["groq/llama3-70b-8192", "groq/llama3-8b-8192", "groq/mixtral-8x7b-32768"],
   },
 ];
 

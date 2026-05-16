@@ -30,7 +30,7 @@ export class LLMClient {
 
     // Fallback for old config style (no provider prefix)
     if (!modelName && providerId) {
-      const apiKey = this.config.apiKey || process.env.OPENAI_API_KEY || process.env.OPENCODE_API_KEY;
+      const apiKey = this.config.apiKey || process.env.OPENAI_API_KEY;
       const baseURL = this.config.apiEndpoint || "https://api.openai.com/v1";
       
       const provider = createOpenAI({
@@ -61,12 +61,6 @@ export class LLMClient {
         return createCohere({ apiKey, baseURL })(modelName);
       case "replicate":
         return (replicate as any).model(modelName);
-      case "opencode":
-        return createOpenAICompatible({
-          name: "opencode",
-          apiKey: apiKey || this.config.apiKey,
-          baseURL: baseURL || "https://opencode.ai/zen/v1",
-        })(modelName);
       default:
         if (baseURL) {
           return createOpenAICompatible({

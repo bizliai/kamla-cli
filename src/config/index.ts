@@ -6,7 +6,7 @@ import type { AgentConfig } from "../types/index.js";
 import Conf from "conf";
 
 const schema = {
-  model: { type: "string" as const, default: "google/gemini-1.5-flash" },
+  model: { type: "string" as const, default: "" },
   maxTurns: { type: "number" as const, default: 50 },
   sandbox: { type: "string" as const, default: "restricted" },
   approveCommands: { type: "array" as const, items: { type: "string" as const }, default: ["npm test", "npm run", "git status", "git diff"] },
@@ -22,7 +22,7 @@ const globalConfig = new Conf({
 });
 
 const DEFAULT_CONFIG: AgentConfig = {
-  model: "google/gemini-1.5-flash",
+  model: "",
   maxTurns: 50,
   sandbox: "restricted",
   approveCommands: ["npm test", "npm run", "git status", "git diff"],
@@ -61,15 +61,22 @@ export function loadConfig(cwd: string = process.cwd()): AgentConfig {
     } catch (e) {
       console.warn(`Failed to load config from ${configPath}:`, e);
     }
-  } else {
-    // Load from global store if no local config
-    fileConfig = globalConfig.store as Partial<AgentConfig>;
   }
+
+  // Always load from global store as base
+  const globalStore = globalConfig.store as Partial<AgentConfig>;
 
   const config = {
     ...DEFAULT_CONFIG,
+    ...globalStore,
     ...fileConfig,
   } as AgentConfig;
+
+  // Deep merge providers
+  config.providers = {
+    ...(globalStore.providers || {}),
+    ...(fileConfig.providers || {}),
+  };
 
   // Backfill providers from environment variables (overriding file config for security)
   if (!config.providers) {
@@ -83,12 +90,24 @@ export function loadConfig(cwd: string = process.cwd()): AgentConfig {
     }
   };
 
+  // Sync explicitly requested providers
   syncEnv("openai", "OPENAI_API_KEY");
   syncEnv("anthropic", "ANTHROPIC_API_KEY");
-  syncEnv("opencode", "OPENCODE_API_KEY");
   syncEnv("google", "GOOGLE_API_KEY");
   syncEnv("mistral", "MISTRAL_API_KEY");
   syncEnv("groq", "GROQ_API_KEY");
+
+  // Dynamically sync any other providers defined in the config or current model
+  for (const providerId of Object.keys(config.providers || {})) {
+    syncEnv(providerId, `${providerId.toUpperCase()}_API_KEY`);
+  }
+  
+  if (config.model) {
+    const [modelProviderId] = config.model.split("/");
+    if (modelProviderId) {
+      syncEnv(modelProviderId, `${modelProviderId.toUpperCase()}_API_KEY`);
+    }
+  }
 
   return config;
 }
@@ -133,19 +152,7 @@ export function validateConfig(config: AgentConfig): string[] {
 }
 
 export function needsSetup(cwd: string = process.cwd()): boolean {
-  // Check local first
-  const configPath = join(cwd, CONFIG_FILENAME);
-  if (existsSync(configPath)) {
-    try {
-      const content = JSON.parse(readFileSync(configPath, "utf-8"));
-      if (content.model) return false;
-    } catch {}
-  }
-
-  // Check global
   const config = loadConfig(cwd);
-  const [providerId] = config.model.split("/");
-  const providerConfig = config.providers?.[providerId];
-  
-  return !providerConfig?.apiKey && !process.env[`${providerId.toUpperCase()}_API_KEY`];
+  const errors = validateConfig(config);
+  return errors.length > 0;
 }

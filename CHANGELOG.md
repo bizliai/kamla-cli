@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Interactive chat mode (`kamla chat`)
 - Autonomous task runner (`kamla run <task>`)
-- Configurable LLM provider support (OpenAI, OpenCode)
+- Configurable LLM provider support
 - Sandbox security modes (read-only, restricted, full)
 - Configuration setup wizard
 - File and shell tools for agent execution

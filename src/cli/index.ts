@@ -285,6 +285,7 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
       config: conf,
       onToolCall: (tc) => {
         spinner.stop();
+        logger.debug(`Tool Call: ${tc.name}`, tc.arguments);
         if (isResponding) {
           process.stdout.write("\n");
           isResponding = false;
@@ -303,8 +304,10 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
       onToolResult: (tr) => {
         spinner.stop();
         if (tr.is_error) {
+          logger.error(`Tool execution error`, tr);
           console.error(`  ${symbols.error} ${chalk.red("Error:")} ${chalk.red(tr.output.slice(0, 500))}`);
         } else {
+          logger.debug(`Tool completed successfully`, tr);
           console.log(`  ${symbols.success} ${chalk.green("Tool completed.")}`);
         }
         console.log();
@@ -725,11 +728,15 @@ async function runTask(config: ReturnType<typeof loadConfig>, task: string, stre
   const agent = new Agent({
     config,
     onToolCall: (tc) => {
+      logger.debug(`Task Tool Call: ${tc.name}`, tc.arguments);
       spinner.info(chalk.blue(`Executing: ${tc.name}(${JSON.stringify(tc.arguments).slice(0, 50)}...)`));
     },
     onToolResult: (tr) => {
       if (tr.is_error) {
+        logger.error(`Task Tool execution error`, tr);
         console.error(chalk.red(`Error: ${tr.output.slice(0, 100)}`));
+      } else {
+        logger.debug(`Task Tool completed successfully`, tr);
       }
     },
   });
