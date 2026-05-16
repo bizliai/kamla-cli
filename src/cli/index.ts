@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
-import { loadConfig, validateConfig } from "../config/index.js";
-import { runSetup, needsSetup } from "../config/setup.js";
+import { loadConfig, validateConfig, saveGlobalConfig, needsSetup } from "../config/index.js";
+import { runSetup, PROVIDERS } from "../config/setup.js";
 import { Agent } from "../core/agent.js";
 import chalk from "chalk";
 import ora from "ora";
 import { stdin as input, stdout as output } from "process";
 import readline from "readline";
+import inquirer from "inquirer";
 
 async function ensureConfig(opts?: { provider?: string; apiKey?: string; model?: string; sandbox?: string }): Promise<void> {
   if (needsSetup()) {
@@ -84,6 +85,42 @@ program
     await runTask(config, task, opts.stream ?? true);
   });
 
+program
+  .command("model")
+  .description("Change the current model")
+  .action(async () => {
+    const config = loadConfig();
+    const [currentProvider] = config.model.split("/");
+    const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
+    const models = providerConfig?.models || [];
+
+    const { model } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "model",
+        message: "Select a model:",
+        choices: [...models, "Enter custom model ID"],
+        default: config.model,
+      },
+    ]);
+
+    let finalModel = model;
+    if (model === "Enter custom model ID") {
+      const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
+      finalModel = customModel;
+    }
+
+    saveGlobalConfig({ model: finalModel });
+    console.log(chalk.green(`Model updated to: ${finalModel}`));
+  });
+
+program
+  .command("provider")
+  .description("Change the current provider")
+  .action(async () => {
+    await runSetup(process.cwd(), { global: true });
+  });
+
 const setupAction = async (opts: any) => {
   await runSetup(process.cwd(), opts);
 };
@@ -91,7 +128,7 @@ const setupAction = async (opts: any) => {
 program
   .command("init")
   .description("Initialize configuration (alias for setup)")
-  .option("-p, --provider <provider>", "LLM provider (openai, opencode)")
+  .option("-p, --provider <provider>", "LLM provider")
   .option("-k, --api-key <key>", "API key")
   .option("-m, --model <model>", "Model name")
   .option("-s, --sandbox <mode>", "Sandbox mode")
@@ -109,19 +146,30 @@ program
 program
   .command("setup")
   .description("Run the setup wizard")
-  .option("-p, --provider <provider>", "LLM provider (openai, opencode)")
+  .option("-p, --provider <provider>", "LLM provider")
   .option("-k, --api-key <key>", "API key")
   .option("-m, --model <model>", "Model name")
   .option("-s, --sandbox <mode>", "Sandbox mode")
   .action(setupAction);
 
+// Default action: if no command is provided, check config and start chat or setup
+program.action(async () => {
+  if (needsSetup()) {
+    await runSetup();
+  } else {
+    const config = loadConfig();
+    await startChat(config);
+  }
+});
+
 program.parse();
 
 async function startChat(config: ReturnType<typeof loadConfig>): Promise<void> {
+  let currentConfig = { ...config };
   const spinner = ora("Starting agent...").start();
 
-  const agent = new Agent({
-    config,
+  let agent = new Agent({
+    config: currentConfig,
     onToolCall: (tc) => {
       spinner.info(chalk.blue(`Executing tool: ${tc.name}`));
     },
@@ -130,25 +178,70 @@ async function startChat(config: ReturnType<typeof loadConfig>): Promise<void> {
         console.error(chalk.red(`Tool error: ${tr.output.slice(0, 200)}`));
       }
     },
-    onResponse: (text) => {
-      // Will be printed at end
-    },
   });
 
-  spinner.succeed("Agent ready!");
+  spinner.succeed(`Agent ready! (Model: ${chalk.cyan(currentConfig.model)})`);
 
-  console.log(chalk.gray("Type your message and press Enter. Ctrl+C to exit.\n"));
+  console.log(chalk.gray("Type your message. Use /model to switch model, /provider for setup, or /exit to quit.\n"));
 
   const rl = readline.createInterface({ input, output });
 
   const ask = () => {
-    rl.question(chalk.green("> "), async (input) => {
-      if (!input.trim()) {
+    rl.question(chalk.green("> "), async (inputStr) => {
+      const trimmedInput = inputStr.trim();
+      
+      if (!trimmedInput) {
         ask();
         return;
       }
 
-      const response = await agent.run(input);
+      if (trimmedInput === "/exit" || trimmedInput === "/quit") {
+        rl.close();
+        return;
+      }
+
+      if (trimmedInput === "/model") {
+        rl.pause();
+        const [currentProvider] = currentConfig.model.split("/");
+        const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
+        const models = providerConfig?.models || [];
+        
+        const { model } = await inquirer.prompt([{
+          type: "list",
+          name: "model",
+          message: "Switch to model:",
+          choices: [...models, "Enter custom model ID"],
+          default: currentConfig.model,
+        }]);
+
+        let finalModel = model;
+        if (model === "Enter custom model ID") {
+          const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
+          finalModel = customModel;
+        }
+
+        currentConfig.model = finalModel;
+        saveGlobalConfig({ model: finalModel });
+        
+        agent = new Agent({ config: currentConfig }); // Re-init agent
+        console.log(chalk.green(`Switched to model: ${finalModel}`));
+        rl.resume();
+        ask();
+        return;
+      }
+
+      if (trimmedInput === "/provider") {
+        rl.pause();
+        await runSetup(process.cwd(), { global: true });
+        currentConfig = loadConfig();
+        agent = new Agent({ config: currentConfig });
+        console.log(chalk.green(`Switched to provider and model: ${currentConfig.model}`));
+        rl.resume();
+        ask();
+        return;
+      }
+
+      const response = await agent.run(trimmedInput);
       console.log(chalk.white(response));
       console.log();
       ask();

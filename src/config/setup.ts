@@ -4,12 +4,14 @@ import { join } from "path";
 import { homedir } from "os";
 import chalk from "chalk";
 import { isTTY } from "../cli/utils.js";
+import { saveGlobalConfig } from "./index.js";
 
 export interface ProviderConfig {
   name: string;
   id: string;
   apiEndpoint?: string;
   model: string;
+  models?: string[];
 }
 
 export const PROVIDERS: ProviderConfig[] = [
@@ -17,31 +19,37 @@ export const PROVIDERS: ProviderConfig[] = [
     name: "OpenCode Zen (Free)",
     id: "opencode",
     model: "opencode/minimax-m2.5-free",
+    models: ["opencode/minimax-m2.5-free"],
   },
   {
     name: "OpenAI",
     id: "openai",
     model: "openai/gpt-4o",
+    models: ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-3.5-turbo"],
   },
   {
     name: "Anthropic",
     id: "anthropic",
     model: "anthropic/claude-3-5-sonnet-20240620",
+    models: ["anthropic/claude-3-5-sonnet-20240620", "anthropic/claude-3-opus-20240229", "anthropic/claude-3-haiku-20240307"],
   },
   {
     name: "Google Gemini",
     id: "google",
     model: "google/gemini-1.5-pro",
+    models: ["google/gemini-1.5-pro", "google/gemini-1.5-flash"],
   },
   {
     name: "Mistral",
     id: "mistral",
     model: "mistral/mistral-large-latest",
+    models: ["mistral/mistral-large-latest", "mistral/mistral-small-latest"],
   },
   {
     name: "Groq",
     id: "groq",
     model: "groq/llama3-70b-8192",
+    models: ["groq/llama3-70b-8192", "groq/llama3-8b-8192", "groq/mixtral-8x7b-32768"],
   },
 ];
 
@@ -52,26 +60,21 @@ export interface SetupOptions {
   apiKey?: string;
   model?: string;
   sandbox?: string;
+  global?: boolean;
 }
 
 export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions): Promise<void> {
   console.log(chalk.cyan("\n🚀 Welcome to Kamla!\n"));
   console.log(chalk.gray("Let's set up your configuration.\n"));
 
-  let answers: {
-    provider: string;
-    apiKey: string;
-    model: string;
-    sandbox: string;
-  };
+  let answers: any;
 
-  if (!isTTY() || opts?.provider) {
+  if (!isTTY() || (opts?.provider && opts?.apiKey)) {
     const providerId = opts?.provider || "opencode";
-    const envKey = `${providerId.toUpperCase()}_API_KEY`;
-    const apiKey = opts?.apiKey || process.env[envKey] || process.env.OPENAI_API_KEY || process.env.OPENCODE_API_KEY;
+    const apiKey = opts?.apiKey;
     
     if (!apiKey) {
-      console.log(chalk.red(`Error: API key required for provider '${providerId}'. Set ${envKey} env variable, or run with interactive mode.`));
+      console.log(chalk.red(`Error: API key required for provider '${providerId}'.`));
       process.exit(1);
     }
 
@@ -82,7 +85,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       sandbox: opts?.sandbox || "restricted",
     };
   } else {
-    answers = await inquirer.prompt([
+    const providerResponse = await inquirer.prompt([
       {
         type: "list",
         name: "provider",
@@ -96,22 +99,17 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
         ],
         default: "opencode",
       },
-      {
-        type: "input",
-        name: "customProvider",
-        message: "Enter provider ID (e.g. 'local'):",
-        when: (a) => a.provider === "other",
-      },
-      {
-        type: "input",
-        name: "baseURL",
-        message: "Base URL (e.g. http://localhost:11434/v1):",
-        when: (a) => a.provider === "other",
-      },
+    ]);
+
+    const finalProviderId = providerResponse.provider === "other" 
+      ? (await inquirer.prompt([{ type: "input", name: "id", message: "Enter provider ID:" }])).id
+      : providerResponse.provider;
+
+    const apiKeyResponse = await inquirer.prompt([
       {
         type: "password",
         name: "apiKey",
-        message: "Enter your API key:",
+        message: `Enter your API key for ${finalProviderId}:`,
         mask: "*",
         validate: (input: string) => {
           if (!input || input.trim().length < 5) {
@@ -122,13 +120,33 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       },
       {
         type: "input",
-        name: "model",
-        message: "Model ID (e.g. 'openai/gpt-4o'):",
-        default: (a: any) => {
-          const provider = PROVIDERS.find((p) => p.id === a.provider);
-          return provider?.model || (a.customProvider ? `${a.customProvider}/model` : "openai/gpt-4o");
-        },
+        name: "baseURL",
+        message: "Base URL (optional, e.g. http://localhost:11434/v1):",
+        when: () => providerResponse.provider === "other",
       },
+    ]);
+
+    // Now offer model selection based on provider
+    const providerConfig = PROVIDERS.find(p => p.id === finalProviderId);
+    const modelChoices = providerConfig?.models || [];
+
+    const modelResponse = await inquirer.prompt([
+      {
+        type: "list",
+        name: "model",
+        message: "Select a model:",
+        choices: [...modelChoices, "Enter custom model ID"],
+        when: () => modelChoices.length > 0,
+      },
+      {
+        type: "input",
+        name: "customModel",
+        message: "Enter custom model ID (e.g. 'openai/gpt-4o'):",
+        when: (a) => a.model === "Enter custom model ID" || modelChoices.length === 0,
+      },
+    ]);
+
+    const sandboxResponse = await inquirer.prompt([
       {
         type: "list",
         name: "sandbox",
@@ -141,43 +159,56 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
         default: "restricted",
       },
     ]);
+
+    const saveModeResponse = await inquirer.prompt([
+      {
+        type: "list",
+        name: "saveMode",
+        message: "Where do you want to save this configuration?",
+        choices: [
+          { name: "Global - Save to your home directory (recommended for general use)", value: "global" },
+          { name: "Local - Save to current directory (kamla.config.json)", value: "local" },
+        ],
+        default: "global",
+      },
+    ]);
+
+    answers = {
+      provider: finalProviderId,
+      apiKey: apiKeyResponse.apiKey,
+      baseURL: apiKeyResponse.baseURL,
+      model: modelResponse.customModel || modelResponse.model,
+      sandbox: sandboxResponse.sandbox,
+      saveMode: saveModeResponse.saveMode,
+    };
   }
 
-  const finalProviderId = answers.provider === "other" ? (answers as any).customProvider : answers.provider;
-  
   const config: any = {
     model: answers.model,
     providers: {
-      [finalProviderId]: {
+      [answers.provider]: {
         apiKey: answers.apiKey,
-        baseURL: (answers as any).baseURL,
+        baseURL: answers.baseURL,
       },
     },
-    maxTurns: 50,
     sandbox: answers.sandbox,
-    approveCommands: ["npm test", "npm run", "git status", "git diff"],
-    blockCommands: ["rm -rf /", "dd if=", ":(){ :|:& };:"],
-    temperature: 0.7,
-    timeout: 30000,
   };
 
-  const configPath = join(cwd, CONFIG_FILENAME);
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
-
-  console.log(chalk.green("\n✅ Configuration saved to ") + chalk.gray(configPath));
-  console.log(chalk.gray("\nYou can now use ") + chalk.cyan(`kamla chat --model ${answers.model}`) + chalk.gray(" to start.\n"));
-}
-
-export function needsSetup(cwd: string = process.cwd()): boolean {
-  const configPath = join(cwd, CONFIG_FILENAME);
-  if (!existsSync(configPath)) {
-    return true;
+  if (answers.saveMode === "global" || opts?.global) {
+    saveGlobalConfig(config);
+    console.log(chalk.green("\n✅ Global configuration saved!"));
+  } else {
+    const configPath = join(cwd, CONFIG_FILENAME);
+    writeFileSync(configPath, JSON.stringify({
+      ...config,
+      maxTurns: 50,
+      approveCommands: ["npm test", "npm run", "git status", "git diff"],
+      blockCommands: ["rm -rf /", "dd if=", ":(){ :|:& };:"],
+      temperature: 0.7,
+      timeout: 30000,
+    }, null, 2));
+    console.log(chalk.green("\n✅ Configuration saved to ") + chalk.gray(configPath));
   }
 
-  try {
-    const content = JSON.parse(readFileSync(configPath, "utf-8"));
-    return !content.apiKey || content.apiKey === "";
-  } catch {
-    return true;
-  }
+  console.log(chalk.gray("\nYou can now use ") + chalk.cyan("kamla chat") + chalk.gray(" to start.\n"));
 }
