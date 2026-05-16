@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
+import { config as dotenvConfig } from "dotenv";
 import { join } from "path";
 import { homedir } from "os";
 import type { AgentConfig } from "../types/index.js";
@@ -48,6 +49,8 @@ export function findConfigFile(cwd: string = process.cwd()): string | null {
 }
 
 export function loadConfig(cwd: string = process.cwd()): AgentConfig {
+  dotenvConfig(); // Load .env if present
+
   const configPath = findConfigFile(cwd);
   
   let fileConfig: Partial<AgentConfig> = {};
@@ -68,14 +71,15 @@ export function loadConfig(cwd: string = process.cwd()): AgentConfig {
     ...fileConfig,
   } as AgentConfig;
 
-  // Backfill providers from legacy env vars if needed
+  // Backfill providers from environment variables (overriding file config for security)
   if (!config.providers) {
     config.providers = {};
   }
 
   const syncEnv = (id: string, envKey: string) => {
-    if (process.env[envKey] && (!config.providers![id] || !config.providers![id].apiKey)) {
-      config.providers![id] = { ...config.providers![id], apiKey: process.env[envKey] };
+    const envValue = process.env[envKey];
+    if (envValue) {
+      config.providers![id] = { ...config.providers![id], apiKey: envValue };
     }
   };
 

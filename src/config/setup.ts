@@ -1,5 +1,5 @@
 import inquirer from "inquirer";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import chalk from "chalk";
@@ -198,7 +198,20 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
     saveGlobalConfig(config);
     console.log(chalk.green("\n✅ Global configuration saved!"));
   } else {
+    // For local setup, we save non-sensitive config to kamla.config.json
+    // and sensitive keys to .env (which should be git-ignored)
     const configPath = join(cwd, CONFIG_FILENAME);
+    const envPath = join(cwd, ".env");
+
+    const providerId = answers.provider;
+    const apiKey = answers.apiKey;
+    const envVarName = `${providerId.toUpperCase()}_API_KEY`;
+
+    // Remove apiKey from the config that gets saved to JSON
+    if (config.providers && config.providers[providerId]) {
+      delete config.providers[providerId].apiKey;
+    }
+
     writeFileSync(configPath, JSON.stringify({
       ...config,
       maxTurns: 50,
@@ -207,7 +220,30 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       temperature: 0.7,
       timeout: 30000,
     }, null, 2));
-    console.log(chalk.green("\n✅ Configuration saved to ") + chalk.gray(configPath));
+
+    // Append/Write to .env
+    const envLine = `${envVarName}=${apiKey}\n`;
+    try {
+      if (existsSync(envPath)) {
+        const envContent = readFileSync(envPath, "utf-8");
+        if (!envContent.includes(envVarName)) {
+          appendFileSync(envPath, `\n${envLine}`);
+        } else {
+          // Update existing line
+          const lines = envContent.split("\n");
+          const newLines = lines.map(line => line.startsWith(`${envVarName}=`) ? `${envVarName}=${apiKey}` : line);
+          writeFileSync(envPath, newLines.join("\n"));
+        }
+      } else {
+        writeFileSync(envPath, envLine);
+      }
+      console.log(chalk.green("\n✅ Configuration saved!"));
+      console.log(chalk.gray(`- Settings: ${configPath}`));
+      console.log(chalk.gray(`- API Key:  ${envPath} (Git-ignored)`));
+    } catch (err) {
+      console.warn(chalk.yellow(`\n⚠️  Could not save API key to .env: ${err}`));
+      console.log(chalk.green("✅ Non-sensitive configuration saved to ") + chalk.gray(configPath));
+    }
   }
 
   console.log(chalk.gray("\nYou can now use ") + chalk.cyan("kamla chat") + chalk.gray(" to start.\n"));
