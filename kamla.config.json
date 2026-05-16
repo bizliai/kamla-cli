@@ -1,7 +1,7 @@
 {
-  "model": "opencode/minimax-m2.5-free",
+  "model": "google/gemini-1.5-flash",
   "providers": {
-    "opencode": {}
+    "google": {}
   },
   "maxTurns": 50,
   "sandbox": "restricted",

@@ -122,8 +122,7 @@ Kamla uses a `kamla.config.json` file in your project root or home directory.
 
 ```json
 {
-  "model": "minimax-m2.5-free",
-  "apiEndpoint": "https://opencode.ai/zen/v1",
+  "model": "google/gemini-1.5-flash",
   "sandbox": "restricted",
   "approveCommands": ["npm test", "git commit"],
   "blockCommands": ["rm -rf", "dd"]

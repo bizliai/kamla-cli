@@ -6,7 +6,7 @@ import type { AgentConfig } from "../types/index.js";
 import Conf from "conf";
 
 const schema = {
-  model: { type: "string" as const, default: "opencode/minimax-m2.5-free" },
+  model: { type: "string" as const, default: "google/gemini-1.5-flash" },
   maxTurns: { type: "number" as const, default: 50 },
   sandbox: { type: "string" as const, default: "restricted" },
   approveCommands: { type: "array" as const, items: { type: "string" as const }, default: ["npm test", "npm run", "git status", "git diff"] },
@@ -22,7 +22,7 @@ const globalConfig = new Conf({
 });
 
 const DEFAULT_CONFIG: AgentConfig = {
-  model: "opencode/minimax-m2.5-free",
+  model: "google/gemini-1.5-flash",
   maxTurns: 50,
   sandbox: "restricted",
   approveCommands: ["npm test", "npm run", "git status", "git diff"],

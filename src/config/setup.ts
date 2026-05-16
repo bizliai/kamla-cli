@@ -16,10 +16,10 @@ export interface ProviderConfig {
 
 export const PROVIDERS: ProviderConfig[] = [
   {
-    name: "OpenCode Zen (Free)",
-    id: "opencode",
-    model: "opencode/minimax-m2.5-free",
-    models: ["opencode/minimax-m2.5-free"],
+    name: "Google Gemini",
+    id: "google",
+    model: "google/gemini-1.5-pro",
+    models: ["google/gemini-1.5-pro", "google/gemini-1.5-flash", "google/gemini-2.0-flash-exp"],
   },
   {
     name: "OpenAI",
@@ -33,12 +33,7 @@ export const PROVIDERS: ProviderConfig[] = [
     model: "anthropic/claude-3-5-sonnet-20240620",
     models: ["anthropic/claude-3-5-sonnet-20240620", "anthropic/claude-3-opus-20240229", "anthropic/claude-3-haiku-20240307"],
   },
-  {
-    name: "Google Gemini",
-    id: "google",
-    model: "google/gemini-1.5-pro",
-    models: ["google/gemini-1.5-pro", "google/gemini-1.5-flash"],
-  },
+
   {
     name: "Mistral",
     id: "mistral",
@@ -70,7 +65,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
   let answers: any;
 
   if (!isTTY() || (opts?.provider && opts?.apiKey)) {
-    const providerId = opts?.provider || "opencode";
+    const providerId = opts?.provider || "google";
     const apiKey = opts?.apiKey;
     
     if (!apiKey) {
@@ -97,7 +92,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
           })),
           { name: "Other (OpenAI Compatible)", value: "other" },
         ],
-        default: "opencode",
+        default: "google",
       },
     ]);
 
