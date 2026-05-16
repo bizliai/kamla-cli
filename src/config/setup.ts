@@ -8,22 +8,40 @@ import { isTTY } from "../cli/utils.js";
 export interface ProviderConfig {
   name: string;
   id: string;
-  apiEndpoint: string;
+  apiEndpoint?: string;
   model: string;
 }
 
 export const PROVIDERS: ProviderConfig[] = [
   {
-    name: "OpenAI",
-    id: "openai",
-    apiEndpoint: "https://api.openai.com/v1",
-    model: "gpt-4",
+    name: "OpenCode Zen (Free)",
+    id: "opencode",
+    model: "opencode/minimax-m2.5-free",
   },
   {
-    name: "OpenCode Zen (OpenAI Compatible)",
-    id: "opencode",
-    apiEndpoint: "https://opencode.ai/zen/v1",
-    model: "minimax-m2.5-free",
+    name: "OpenAI",
+    id: "openai",
+    model: "openai/gpt-4o",
+  },
+  {
+    name: "Anthropic",
+    id: "anthropic",
+    model: "anthropic/claude-3-5-sonnet-20240620",
+  },
+  {
+    name: "Google Gemini",
+    id: "google",
+    model: "google/gemini-1.5-pro",
+  },
+  {
+    name: "Mistral",
+    id: "mistral",
+    model: "mistral/mistral-large-latest",
+  },
+  {
+    name: "Groq",
+    id: "groq",
+    model: "groq/llama3-70b-8192",
   },
 ];
 
@@ -48,17 +66,19 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
   };
 
   if (!isTTY() || opts?.provider) {
-    const apiKey = opts?.apiKey || process.env.OPENCODE_API_KEY || process.env.OPENAI_API_KEY;
+    const providerId = opts?.provider || "opencode";
+    const envKey = `${providerId.toUpperCase()}_API_KEY`;
+    const apiKey = opts?.apiKey || process.env[envKey] || process.env.OPENAI_API_KEY || process.env.OPENCODE_API_KEY;
+    
     if (!apiKey) {
-      console.log(chalk.red("Error: API key required. Set OPENCODE_API_KEY or OPENAI_API_KEY env variable, or run with interactive mode."));
-      console.log(chalk.gray("\nOr use: kamla setup --provider opencode --apiKey YOUR_KEY\n"));
+      console.log(chalk.red(`Error: API key required for provider '${providerId}'. Set ${envKey} env variable, or run with interactive mode.`));
       process.exit(1);
     }
 
     answers = {
-      provider: opts?.provider || "opencode",
+      provider: providerId,
       apiKey: apiKey,
-      model: opts?.model || PROVIDERS.find((p) => p.id === (opts?.provider || "opencode"))?.model || "gpt-4",
+      model: opts?.model || PROVIDERS.find((p) => p.id === providerId)?.model || `${providerId}/default`,
       sandbox: opts?.sandbox || "restricted",
     };
   } else {
@@ -67,11 +87,26 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
         type: "list",
         name: "provider",
         message: "Which LLM provider do you want to use?",
-        choices: PROVIDERS.map((p) => ({
-          name: p.name,
-          value: p.id,
-        })),
+        choices: [
+          ...PROVIDERS.map((p) => ({
+            name: p.name,
+            value: p.id,
+          })),
+          { name: "Other (OpenAI Compatible)", value: "other" },
+        ],
         default: "opencode",
+      },
+      {
+        type: "input",
+        name: "customProvider",
+        message: "Enter provider ID (e.g. 'local'):",
+        when: (a) => a.provider === "other",
+      },
+      {
+        type: "input",
+        name: "baseURL",
+        message: "Base URL (e.g. http://localhost:11434/v1):",
+        when: (a) => a.provider === "other",
       },
       {
         type: "password",
@@ -79,7 +114,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
         message: "Enter your API key:",
         mask: "*",
         validate: (input: string) => {
-          if (!input || input.trim().length < 10) {
+          if (!input || input.trim().length < 5) {
             return "Please enter a valid API key";
           }
           return true;
@@ -88,10 +123,10 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       {
         type: "input",
         name: "model",
-        message: "Model name (press Enter for default):",
-        default: (answers: { provider: string }) => {
-          const provider = PROVIDERS.find((p) => p.id === answers.provider);
-          return provider?.model || "gpt-4";
+        message: "Model ID (e.g. 'openai/gpt-4o'):",
+        default: (a: any) => {
+          const provider = PROVIDERS.find((p) => p.id === a.provider);
+          return provider?.model || (a.customProvider ? `${a.customProvider}/model` : "openai/gpt-4o");
         },
       },
       {
@@ -108,12 +143,16 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
     ]);
   }
 
-  const provider = PROVIDERS.find((p) => p.id === answers.provider)!;
-
-  const config = {
-    model: answers.model || provider.model,
-    apiEndpoint: provider.apiEndpoint,
-    apiKey: answers.apiKey,
+  const finalProviderId = answers.provider === "other" ? (answers as any).customProvider : answers.provider;
+  
+  const config: any = {
+    model: answers.model,
+    providers: {
+      [finalProviderId]: {
+        apiKey: answers.apiKey,
+        baseURL: (answers as any).baseURL,
+      },
+    },
     maxTurns: 50,
     sandbox: answers.sandbox,
     approveCommands: ["npm test", "npm run", "git status", "git diff"],
@@ -126,7 +165,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
   writeFileSync(configPath, JSON.stringify(config, null, 2));
 
   console.log(chalk.green("\n✅ Configuration saved to ") + chalk.gray(configPath));
-  console.log(chalk.gray("\nYou can always edit this file or run ") + chalk.cyan("kamla config") + chalk.gray(" to view it.\n"));
+  console.log(chalk.gray("\nYou can now use ") + chalk.cyan(`kamla chat --model ${answers.model}`) + chalk.gray(" to start.\n"));
 }
 
 export function needsSetup(cwd: string = process.cwd()): boolean {

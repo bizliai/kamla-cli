@@ -20,13 +20,13 @@ const program = new Command();
 
 program
   .name("kamla")
-  .description("Autonomous code agent powered by LLMs")
+  .description("Code, create, and automate with AI")
   .version("1.0.0");
 
 program
-  .option("-p, --provider <provider>", "LLM provider (openai, opencode)")
+  .option("-p, --provider <provider>", "LLM provider (openai, anthropic, google, etc.)")
   .option("-k, --api-key <key>", "API key")
-  .option("-m, --model <model>", "Model name")
+  .option("-m, --model <model>", "Model name (e.g. provider/model)")
   .option("-s, --sandbox <mode>", "Sandbox mode (read-only, restricted, full)");
 
 program
@@ -84,16 +84,18 @@ program
     await runTask(config, task, opts.stream ?? true);
   });
 
+const setupAction = async (opts: any) => {
+  await runSetup(process.cwd(), opts);
+};
+
 program
   .command("init")
-  .description("Run the setup wizard")
+  .description("Initialize configuration (alias for setup)")
   .option("-p, --provider <provider>", "LLM provider (openai, opencode)")
   .option("-k, --api-key <key>", "API key")
   .option("-m, --model <model>", "Model name")
   .option("-s, --sandbox <mode>", "Sandbox mode")
-  .action(async (opts) => {
-    await runSetup(process.cwd(), opts);
-  });
+  .action(setupAction);
 
 program
   .command("config")
@@ -111,9 +113,7 @@ program
   .option("-k, --api-key <key>", "API key")
   .option("-m, --model <model>", "Model name")
   .option("-s, --sandbox <mode>", "Sandbox mode")
-  .action(async (opts) => {
-    await runSetup(process.cwd(), opts);
-  });
+  .action(setupAction);
 
 program.parse();
 

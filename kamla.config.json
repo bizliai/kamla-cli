@@ -1,7 +1,10 @@
 {
-  "model": "minimax-m2.5-free",
-  "apiEndpoint": "https://opencode.ai/zen/v1",
-  "apiKey": "",
+  "model": "opencode/minimax-m2.5-free",
+  "providers": {
+    "opencode": {
+      "apiKey": "sk-mPxw54NbHL3j4IDnLzSx7M0dBiRslT4Q4YgCYnmFzfZk6aTFs7bjR7RL1MZdlHxA"
+    }
+  },
   "maxTurns": 50,
   "sandbox": "restricted",
   "approveCommands": [

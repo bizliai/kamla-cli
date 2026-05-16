@@ -29,8 +29,12 @@ export interface Message {
 
 export interface AgentConfig {
   model: string;
-  apiEndpoint: string;
-  apiKey: string;
+  apiEndpoint?: string;
+  apiKey?: string;
+  providers?: Record<string, {
+    apiKey?: string;
+    baseURL?: string;
+  }>;
   maxTurns: number;
   sandbox: "read-only" | "restricted" | "full";
   approveCommands: string[];

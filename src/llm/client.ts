@@ -1,241 +1,193 @@
+import { 
+  generateText, 
+  streamText, 
+  LanguageModel, 
+  tool
+} from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createMistral } from "@ai-sdk/mistral";
+import { createGroq } from "@ai-sdk/groq";
+import { createDeepSeek } from "@ai-sdk/deepseek";
+import { createCohere } from "@ai-sdk/cohere";
+import { replicate } from "@ai-sdk/replicate";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { Message, ToolCall, AgentConfig } from "../types/index.js";
-
-export interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  name?: string;
-  tool_call_id?: string;
-}
-
-export interface ChatTool {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-export interface ChatCompletionRequest {
-  model: string;
-  messages: ChatMessage[];
-  tools?: ChatTool[];
-  tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
-  temperature?: number;
-  stream?: boolean;
-  max_tokens?: number;
-}
-
-export interface ChatChoice {
-  message: {
-    role: string;
-    content: string | null;
-    tool_calls?: Array<{
-      id: string;
-      type: string;
-      function: {
-        name: string;
-        arguments: string;
-      };
-    }>;
-    tool_call_id?: string;
-  };
-  finish_reason: string;
-}
-
-export interface ChatCompletionResponse {
-  id: string;
-  model: string;
-  choices: ChatChoice[];
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
+import { logger } from "../core/logger.js";
+import { z } from "zod";
 
 export class LLMClient {
   private config: AgentConfig;
-  private headers: Record<string, string>;
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-    };
+  }
+
+  private getModel(modelId: string): LanguageModel {
+    const [providerId, ...modelNameParts] = modelId.split("/");
+    const modelName = modelNameParts.join("/");
+
+    // Fallback for old config style (no provider prefix)
+    if (!modelName && providerId) {
+      const apiKey = this.config.apiKey || process.env.OPENAI_API_KEY || process.env.OPENCODE_API_KEY;
+      const baseURL = this.config.apiEndpoint || "https://api.openai.com/v1";
+      
+      const provider = createOpenAI({
+        apiKey,
+        baseURL,
+      });
+      return provider(providerId);
+    }
+
+    const providerConfig = this.config.providers?.[providerId];
+    const apiKey = providerConfig?.apiKey || (providerId !== "other" ? process.env[`${providerId.toUpperCase()}_API_KEY`] : undefined);
+    const baseURL = providerConfig?.baseURL;
+
+    switch (providerId) {
+      case "openai":
+        return createOpenAI({ apiKey, baseURL })(modelName);
+      case "anthropic":
+        return createAnthropic({ apiKey, baseURL })(modelName);
+      case "google":
+        return createGoogleGenerativeAI({ apiKey, baseURL })(modelName);
+      case "mistral":
+        return createMistral({ apiKey, baseURL })(modelName);
+      case "groq":
+        return createGroq({ apiKey, baseURL })(modelName);
+      case "deepseek":
+        return createDeepSeek({ apiKey, baseURL })(modelName);
+      case "cohere":
+        return createCohere({ apiKey, baseURL })(modelName);
+      case "replicate":
+        return (replicate as any).model(modelName);
+      case "opencode":
+        return createOpenAI({
+          apiKey: apiKey || this.config.apiKey,
+          baseURL: baseURL || "https://opencode.ai/zen/v1",
+        })(modelName);
+      default:
+        if (baseURL) {
+          return createOpenAICompatible({
+            name: providerId,
+            apiKey,
+            baseURL,
+          })(modelName);
+        }
+        throw new Error(`Unknown provider: ${providerId}`);
+    }
   }
 
   async chat(
     messages: Message[],
-    tools?: { name: string; description: string; parameters: Record<string, unknown> }[]
+    tools?: { name: string; description: string; parameters: Record<string, any> }[]
   ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-    const chatMessages: ChatMessage[] = messages.map((msg) => ({
-      role: msg.role === "tool" ? "tool" : msg.role,
-      content: msg.content,
-      name: msg.name,
-      tool_call_id: msg.tool_call_id,
-    }));
-
-    const request: ChatCompletionRequest = {
-      model: this.config.model,
-      messages: chatMessages,
-      temperature: this.config.temperature,
-    };
-
-    if (tools && tools.length > 0) {
-      request.tools = tools.map((t) => ({
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-        },
-      }));
-      request.tool_choice = "auto";
-    }
-
-    const url = `${this.config.apiEndpoint}/chat/completions`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify(request),
+    const coreMessages: any[] = messages.map((msg) => {
+      if (msg.role === "tool") {
+        return {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: msg.tool_call_id!,
+              toolName: msg.name!,
+              result: msg.content,
+            },
+          ],
+        };
+      }
+      return {
+        role: msg.role as "system" | "user" | "assistant",
+        content: msg.content,
+      };
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`LLM API error: ${response.status} - ${error}`);
-    }
-
-    const data = await response.json() as ChatCompletionResponse;
-    const choice = data.choices[0];
-
-    if (!choice) {
-      throw new Error("No response from LLM");
-    }
-
-    const content = choice.message.content || "";
-    const toolCalls: ToolCall[] = [];
-
-    if (choice.message.tool_calls) {
-      for (const tc of choice.message.tool_calls) {
-        toolCalls.push({
-          id: tc.id,
-          name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments),
-        });
+    const aiTools: Record<string, any> = {};
+    if (tools) {
+      for (const t of tools) {
+        aiTools[t.name] = tool({
+          description: t.description,
+          parameters: z.object(t.parameters as any),
+        } as any);
       }
     }
 
-    return { content, toolCalls };
+    const model = this.getModel(this.config.model);
+    const { text, toolCalls } = await generateText({
+      model,
+      messages: coreMessages,
+      tools: aiTools,
+      temperature: this.config.temperature,
+    });
+
+    return {
+      content: text,
+      toolCalls: (toolCalls || []).map((tc) => ({
+        id: tc.toolCallId,
+        name: tc.toolName,
+        arguments: (tc as any).args || (tc as any).input || {},
+      })),
+    };
   }
 
   async *streamChat(
     messages: Message[],
-    tools?: { name: string; description: string; parameters: Record<string, unknown> }[]
+    tools?: { name: string; description: string; parameters: Record<string, any> }[]
   ): AsyncGenerator<{ delta: string; toolCalls: ToolCall[]; done: boolean }> {
-    const chatMessages: ChatMessage[] = messages.map((msg) => ({
-      role: msg.role === "tool" ? "tool" : msg.role,
-      content: msg.content,
-      name: msg.name,
-      tool_call_id: msg.tool_call_id,
-    }));
-
-    const request: ChatCompletionRequest = {
-      model: this.config.model,
-      messages: chatMessages,
-      temperature: this.config.temperature,
-      stream: true,
-    };
-
-    if (tools && tools.length > 0) {
-      request.tools = tools.map((t) => ({
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-        },
-      }));
-      request.tool_choice = "auto";
-    }
-
-    const url = `${this.config.apiEndpoint}/chat/completions`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify(request),
+    const coreMessages: any[] = messages.map((msg) => {
+      if (msg.role === "tool") {
+        return {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: msg.tool_call_id!,
+              toolName: msg.name!,
+              result: msg.content,
+            },
+          ],
+        };
+      }
+      return {
+        role: msg.role as "system" | "user" | "assistant",
+        content: msg.content,
+      };
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`LLM API error: ${response.status} - ${error}`);
-    }
-
-    if (!response.body) {
-      throw new Error("Empty response body");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let toolCallBuffer: Map<string, { name: string; arguments: string }> = new Map();
-    let currentToolCall: { id: string; name: string; arguments: string } | null = null;
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") {
-            yield { delta: "", toolCalls: [], done: true };
-            return;
-          }
-
-          try {
-            const chunk = JSON.parse(data);
-            const delta = chunk.choices?.[0]?.delta?.content || "";
-            const toolCalls = chunk.choices?.[0]?.delta?.tool_calls || [];
-
-            for (const tc of toolCalls) {
-              if (tc.id) {
-                currentToolCall = { id: tc.id, name: tc.function?.name || "", arguments: tc.function?.arguments || "" };
-                toolCallBuffer.set(tc.id, currentToolCall);
-              } else if (currentToolCall) {
-                const existing = toolCallBuffer.get(currentToolCall.id)!;
-                existing.arguments += tc.function?.arguments || "";
-              }
-            }
-
-            if (delta || toolCalls.length > 0) {
-              const parsedToolCalls: ToolCall[] = [];
-              for (const [id, tc] of toolCallBuffer) {
-                if (tc.name) {
-                  parsedToolCalls.push({
-                    id,
-                    name: tc.name,
-                    arguments: JSON.parse(tc.arguments || "{}"),
-                  });
-                }
-              }
-              yield { delta, toolCalls: parsedToolCalls, done: false };
-            }
-          } catch {
-            // Skip malformed JSON
-          }
-        }
+    const aiTools: Record<string, any> = {};
+    if (tools) {
+      for (const t of tools) {
+        aiTools[t.name] = tool({
+          description: t.description,
+          parameters: z.object(t.parameters as any),
+        } as any);
       }
-    } finally {
-      reader.releaseLock();
+    }
+
+    const model = this.getModel(this.config.model);
+    const result = await streamText({
+      model,
+      messages: coreMessages,
+      tools: aiTools,
+      temperature: this.config.temperature,
+    });
+
+    let toolCalls: ToolCall[] = [];
+
+    for await (const part of result.fullStream) {
+      if (part.type === "text-delta") {
+        yield { delta: (part as any).text || (part as any).textDelta, toolCalls: [], done: false };
+      } else if (part.type === "tool-call") {
+        const tc: ToolCall = {
+          id: part.toolCallId,
+          name: part.toolName,
+          arguments: (part as any).args || (part as any).input || {},
+        };
+        toolCalls.push(tc);
+        yield { delta: "", toolCalls, done: false };
+      } else if (part.type === "finish") {
+        yield { delta: "", toolCalls, done: true };
+      }
     }
   }
 }

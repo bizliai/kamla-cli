@@ -4,9 +4,7 @@ import { homedir } from "os";
 import type { AgentConfig } from "../types/index.js";
 
 const DEFAULT_CONFIG: AgentConfig = {
-  model: "minimax-m2.5-free",
-  apiEndpoint: "https://opencode.ai/zen/v1",
-  apiKey: process.env.OPENCODE_API_KEY || process.env.OPENAI_API_KEY || "",
+  model: "opencode/minimax-m2.5-free",
   maxTurns: 50,
   sandbox: "restricted",
   approveCommands: ["npm test", "npm run", "git status", "git diff"],
@@ -42,11 +40,27 @@ export function loadConfig(cwd: string = process.cwd()): AgentConfig {
     }
   }
 
-  return {
+  const config = {
     ...DEFAULT_CONFIG,
     ...fileConfig,
-    apiKey: fileConfig.apiKey || process.env.OPENCODE_API_KEY || process.env.OPENAI_API_KEY || "",
   };
+
+  // Backfill providers from legacy env vars if needed
+  if (!config.providers) {
+    config.providers = {};
+  }
+
+  if (process.env.OPENAI_API_KEY && !config.providers.openai) {
+    config.providers.openai = { apiKey: process.env.OPENAI_API_KEY };
+  }
+  if (process.env.ANTHROPIC_API_KEY && !config.providers.anthropic) {
+    config.providers.anthropic = { apiKey: process.env.ANTHROPIC_API_KEY };
+  }
+  if (process.env.OPENCODE_API_KEY && !config.providers.opencode) {
+    config.providers.opencode = { apiKey: process.env.OPENCODE_API_KEY };
+  }
+
+  return config;
 }
 
 export function createDefaultConfig(cwd: string = process.cwd()): void {
@@ -60,12 +74,17 @@ export function createDefaultConfig(cwd: string = process.cwd()): void {
 export function validateConfig(config: AgentConfig): string[] {
   const errors: string[] = [];
   
-  if (!config.apiKey) {
-    errors.push("API key is required (set apiKey in config or OPENAI_API_KEY env var)");
-  }
-  
   if (!config.model) {
     errors.push("Model is required");
+  }
+
+  const [providerId] = config.model.split("/");
+  if (providerId && config.providers) {
+    const providerConfig = config.providers[providerId];
+    const envKey = `${providerId.toUpperCase()}_API_KEY`;
+    if (!providerConfig?.apiKey && !process.env[envKey] && !config.apiKey) {
+      errors.push(`API key for provider '${providerId}' is missing (set in config or ${envKey} env var)`);
+    }
   }
   
   if (config.maxTurns < 1 || config.maxTurns > 200) {

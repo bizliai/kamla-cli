@@ -4,19 +4,19 @@
 
 # Kamla 🤖
 
-[![npm version](https://img.shields.io/npm/v/kamla.svg?style=flat-square)](https://www.npmjs.com/package/kamla)
-[![Documentation](https://img.shields.io/badge/docs-online-brightgreen?style=flat-square)](https://plusemon.github.io/kamla/)
+[![npm version](https://img.shields.io/npm/v/kamla-cli.svg?style=flat-square)](https://www.npmjs.com/package/kamla-cli)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen?style=flat-square)](https://bizliai.github.io/kamla-cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.0-green.svg?style=flat-square)](https://nodejs.org/)
 
-**Kamla** is an autonomous, AI-powered coding agent designed to help you build, debug, and refactor code directly from your terminal. Built with safety and speed in mind, Kamla leverages Large Language Models (LLMs) to perform complex tasks across your filesystem while providing a secure sandbox environment.
+**Kamla** is an AI-powered CLI tool to code, create, and automate tasks directly from your terminal. Built with safety and speed in mind, Kamla leverages Large Language Models (LLMs) to perform complex tasks across your filesystem while providing a secure sandbox environment.
 
 ---
 
 ## 📚 Documentation
 
-View the full documentation at **[plusemon.github.io/kamla](https://plusemon.github.io/kamla/)**.
+View the full documentation at **[bizliai.github.io/kamla-cli](https://bizliai.github.io/kamla-cli/)**.
 
 ---
 
@@ -38,7 +38,7 @@ View the full documentation at **[plusemon.github.io/kamla](https://plusemon.git
 Install Kamla globally via npm:
 
 ```bash
-npm install -g kamla
+npm install -g kamla-cli
 ```
 
 ### Initial Setup

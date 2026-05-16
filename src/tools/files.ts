@@ -1,7 +1,13 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
-import { join, relative } from "path";
+import { join, relative, resolve } from "path";
 import type { ToolDefinition, AgentConfig } from "../types/index.js";
 import type { Tool } from "../core/tools.js";
+
+function isPathSafe(cwd: string, filePath: string): boolean {
+  const resolvedPath = resolve(cwd, filePath);
+  const resolvedCwd = resolve(cwd);
+  return resolvedPath.startsWith(resolvedCwd);
+}
 
 const readFileDefinition: ToolDefinition = {
   name: "read_file",
@@ -82,8 +88,13 @@ export class ReadFileTool implements Tool {
     const filePath = args.path as string;
     if (!filePath) return JSON.stringify({ error: "No path provided" });
 
+    const cwd = process.cwd();
+    if (!isPathSafe(cwd, filePath)) {
+      return JSON.stringify({ error: "Access denied: path outside working directory" });
+    }
+
     try {
-      const resolvedPath = join(process.cwd(), filePath);
+      const resolvedPath = join(cwd, filePath);
       if (!existsSync(resolvedPath)) {
         return JSON.stringify({ error: `File not found: ${filePath}` });
       }
@@ -109,8 +120,13 @@ export class WriteFileTool implements Tool {
       return JSON.stringify({ error: "Writing is disabled in read-only mode" });
     }
 
+    const cwd = process.cwd();
+    if (!isPathSafe(cwd, filePath)) {
+      return JSON.stringify({ error: "Access denied: path outside working directory" });
+    }
+
     try {
-      const resolvedPath = join(process.cwd(), filePath);
+      const resolvedPath = join(cwd, filePath);
       writeFileSync(resolvedPath, content, "utf-8");
       return JSON.stringify({ success: true, path: filePath });
     } catch (e) {
@@ -135,8 +151,13 @@ export class EditFileTool implements Tool {
       return JSON.stringify({ error: "Editing is disabled in read-only mode" });
     }
 
+    const cwd = process.cwd();
+    if (!isPathSafe(cwd, filePath)) {
+      return JSON.stringify({ error: "Access denied: path outside working directory" });
+    }
+
     try {
-      const resolvedPath = join(process.cwd(), filePath);
+      const resolvedPath = join(cwd, filePath);
       if (!existsSync(resolvedPath)) {
         return JSON.stringify({ error: `File not found: ${filePath}` });
       }
@@ -144,7 +165,7 @@ export class EditFileTool implements Tool {
       if (!content.includes(findText)) {
         return JSON.stringify({ error: "Text not found in file" });
       }
-      const newContent = content.replace(findText, replaceText);
+      const newContent = content.split(findText).join(replaceText);
       writeFileSync(resolvedPath, newContent, "utf-8");
       return JSON.stringify({ success: true, path: filePath });
     } catch (e) {
@@ -158,7 +179,13 @@ export class ListDirTool implements Tool {
 
   async execute(args: Record<string, unknown>, _config: AgentConfig): Promise<string> {
     const dirPath = (args.path as string) || ".";
-    const resolvedPath = join(process.cwd(), dirPath);
+    const cwd = process.cwd();
+
+    if (!isPathSafe(cwd, dirPath)) {
+      return JSON.stringify({ error: "Access denied: path outside working directory" });
+    }
+
+    const resolvedPath = join(cwd, dirPath);
 
     try {
       if (!existsSync(resolvedPath)) {
