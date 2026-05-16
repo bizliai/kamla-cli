@@ -1,10 +1,11 @@
-import inquirer from "inquirer";
+import { intro, outro, select, text, password, spinner, note, isCancel, cancel } from "@clack/prompts";
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import chalk from "chalk";
 import { isTTY } from "../cli/utils.js";
 import { saveGlobalConfig } from "./index.js";
+import { kamlaGradient } from "../cli/tui.js";
 
 export interface ProviderConfig {
   name: string;
@@ -58,18 +59,35 @@ export interface SetupOptions {
   global?: boolean;
 }
 
-export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions): Promise<void> {
-  console.log(chalk.cyan("\n🚀 Welcome to Kamla!\n"));
-  console.log(chalk.gray("Let's set up your configuration.\n"));
+function handleCancel(value: any) {
+  if (isCancel(value)) {
+    cancel("Setup cancelled.");
+    process.exit(0);
+  }
+  return value;
+}
 
-  let answers: any;
+export async function getModelsData() {
+  try {
+    const response = await fetch("https://models.dev/api.json");
+    if (!response.ok) return null;
+    return await response.json() as Record<string, any>;
+  } catch {
+    return null;
+  }
+}
+
+export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions): Promise<void> {
+  intro(kamlaGradient(" Kamla Setup "));
+
+  let answers: any = {};
 
   if (!isTTY() || (opts?.provider && opts?.apiKey)) {
     const providerId = opts?.provider || "google";
     const apiKey = opts?.apiKey;
     
     if (!apiKey) {
-      console.log(chalk.red(`Error: API key required for provider '${providerId}'.`));
+      cancel(`Error: API key required for provider '${providerId}'.`);
       process.exit(1);
     }
 
@@ -80,101 +98,157 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       sandbox: opts?.sandbox || "restricted",
     };
   } else {
-    const providerResponse = await inquirer.prompt([
-      {
-        type: "list",
-        name: "provider",
-        message: "Which LLM provider do you want to use?",
-        choices: [
-          ...PROVIDERS.map((p) => ({
-            name: p.name,
-            value: p.id,
-          })),
-          { name: "Other (OpenAI Compatible)", value: "other" },
-        ],
-        default: "google",
-      },
-    ]);
+    const s = spinner();
+    s.start("Fetching models database from models.dev...");
+    const modelsDev = await getModelsData();
+    if (modelsDev) {
+      s.stop("Models database loaded.");
+    } else {
+      s.stop("Failed to load models database. Using offline defaults.");
+    }
 
-    const finalProviderId = providerResponse.provider === "other" 
-      ? (await inquirer.prompt([{ type: "input", name: "id", message: "Enter provider ID:" }])).id
-      : providerResponse.provider;
+    const providerId = handleCancel(await select({
+      message: "Which LLM provider do you want to use?",
+      options: [
+        ...PROVIDERS.map((p) => ({
+          label: p.name,
+          value: p.id,
+        })),
+        { label: "Other / Browse models.dev", value: "other" },
+      ],
+      initialValue: "google",
+    }));
 
-    const apiKeyResponse = await inquirer.prompt([
-      {
-        type: "password",
-        name: "apiKey",
-        message: `Enter your API key for ${finalProviderId}:`,
-        mask: "*",
-        validate: (input: string) => {
-          if (!input || input.trim().length < 5) {
-            return "Please enter a valid API key";
+    let finalProviderId = providerId;
+    let providerFromDev: any = null;
+
+    if (providerId === "other") {
+      if (modelsDev) {
+        let providerChoices = Object.values(modelsDev).sort((a: any, b: any) => a.name.localeCompare(b.name));
+        let filteredProviders = providerChoices;
+        
+        while (true) {
+          const devProviderId = handleCancel(await select({
+            message: "Select a provider from models.dev:",
+            options: [
+              { label: "🔍 Search providers...", value: "search" },
+              ...filteredProviders.slice(0, 50).map((p: any) => ({
+                label: p.name,
+                value: p.id,
+                hint: p.api
+              }))
+            ]
+          }));
+
+          if (devProviderId === "search") {
+            const searchTerm = handleCancel(await text({
+              message: "Enter search term for provider:",
+              placeholder: "e.g. together, fireworks, ollama..."
+            }));
+            filteredProviders = providerChoices.filter((p: any) => 
+              p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+              p.id.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            continue;
           }
-          return true;
-        },
+
+          finalProviderId = devProviderId;
+          providerFromDev = modelsDev[devProviderId];
+          break;
+        }
+      } else {
+        finalProviderId = handleCancel(await text({ message: "Enter provider ID:" }));
+      }
+    } else {
+      if (modelsDev && modelsDev[providerId]) {
+        providerFromDev = modelsDev[providerId];
+      }
+    }
+
+    const apiKey = handleCancel(await password({
+      message: `Enter your API key for ${providerFromDev?.name || finalProviderId}:`,
+      validate: (input?: string) => {
+        if (!input || input.trim().length < 5) {
+          return "Please enter a valid API key";
+        }
       },
-      {
-        type: "input",
-        name: "baseURL",
+    }));
+
+    const providerConfig = PROVIDERS.find(p => p.id === finalProviderId);
+    let baseURL = providerFromDev?.api || providerConfig?.apiEndpoint;
+    if (providerId === "other" && !providerFromDev) {
+      baseURL = handleCancel(await text({
         message: "Base URL (optional, e.g. http://localhost:11434/v1):",
-        when: () => providerResponse.provider === "other",
-      },
-    ]);
+      }));
+    }
 
     // Now offer model selection based on provider
-    const providerConfig = PROVIDERS.find(p => p.id === finalProviderId);
-    const modelChoices = providerConfig?.models || [];
+    let modelChoices: string[] = [];
+    
+    if (providerFromDev) {
+      modelChoices = Object.keys(providerFromDev.models).map(m => `${finalProviderId}/${m}`);
+    } else if (providerConfig) {
+      modelChoices = providerConfig.models || [];
+    }
 
-    const modelResponse = await inquirer.prompt([
-      {
-        type: "list",
-        name: "model",
-        message: "Select a model:",
-        choices: [...modelChoices, "Enter custom model ID"],
-        when: () => modelChoices.length > 0,
-      },
-      {
-        type: "input",
-        name: "customModel",
+    let selectedModel;
+    if (modelChoices.length > 0) {
+      let filteredModels = modelChoices;
+      while (true) {
+        selectedModel = handleCancel(await select({
+          message: "Select a model:",
+          options: [
+            { label: "🔍 Search models...", value: "search" },
+            ...filteredModels.slice(0, 50).map(m => ({ label: m, value: m })),
+            { label: "Enter custom model ID", value: "custom" },
+          ],
+        }));
+
+        if (selectedModel === "search") {
+          const searchTerm = handleCancel(await text({
+            message: "Enter search term for model:",
+            placeholder: "e.g. gpt-4, claude, llama..."
+          }));
+          filteredModels = modelChoices.filter(m => m.toLowerCase().includes(searchTerm.toLowerCase()));
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (!selectedModel || selectedModel === "custom") {
+      selectedModel = handleCancel(await text({
         message: "Enter custom model ID (e.g. 'openai/gpt-4o'):",
-        when: (a) => a.model === "Enter custom model ID" || modelChoices.length === 0,
-      },
-    ]);
+        placeholder: providerFromDev?.model ? `${finalProviderId}/${providerFromDev.model}` : (providerConfig?.model || "provider/model"),
+      }));
+    }
 
-    const sandboxResponse = await inquirer.prompt([
-      {
-        type: "list",
-        name: "sandbox",
-        message: "Sandbox mode (controls what the agent can do):",
-        choices: [
-          { name: "Read-only - Can only read files (safest)", value: "read-only" },
-          { name: "Restricted - Can read/write and run safe commands", value: "restricted" },
-          { name: "Full - Can do anything (use with caution)", value: "full" },
-        ],
-        default: "restricted",
-      },
-    ]);
+    const sandbox = handleCancel(await select({
+      message: "Sandbox mode (controls what the agent can do):",
+      options: [
+        { label: "Read-only - Can only read files (safest)", value: "read-only" },
+        { label: "Restricted - Can read/write and run safe commands", value: "restricted" },
+        { label: "Full - Can do anything (use with caution)", value: "full" },
+      ],
+      initialValue: "restricted",
+    }));
 
-    const saveModeResponse = await inquirer.prompt([
-      {
-        type: "list",
-        name: "saveMode",
-        message: "Where do you want to save this configuration?",
-        choices: [
-          { name: "Global - Save to your home directory (recommended for general use)", value: "global" },
-          { name: "Local - Save to current directory (kamla.config.json)", value: "local" },
-        ],
-        default: "global",
-      },
-    ]);
+    const saveMode = handleCancel(await select({
+      message: "Where do you want to save this configuration?",
+      options: [
+        { label: "Global - Save to your home directory (recommended)", value: "global" },
+        { label: "Local - Save to current directory (kamla.config.json)", value: "local" },
+      ],
+      initialValue: "global",
+    }));
 
     answers = {
       provider: finalProviderId,
-      apiKey: apiKeyResponse.apiKey,
-      baseURL: apiKeyResponse.baseURL,
-      model: modelResponse.customModel || modelResponse.model,
-      sandbox: sandboxResponse.sandbox,
-      saveMode: saveModeResponse.saveMode,
+      apiKey: apiKey,
+      baseURL: baseURL,
+      model: selectedModel,
+      sandbox: sandbox,
+      saveMode: saveMode,
     };
   }
 
@@ -191,7 +265,7 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
 
   if (answers.saveMode === "global" || opts?.global) {
     saveGlobalConfig(config);
-    console.log(chalk.green("\n✅ Global configuration saved!"));
+    note("Global configuration saved successfully!", "Success");
   } else {
     // For local setup, we save non-sensitive config to kamla.config.json
     // and sensitive keys to .env (which should be git-ignored)
@@ -232,14 +306,20 @@ export async function runSetup(cwd: string = process.cwd(), opts?: SetupOptions)
       } else {
         writeFileSync(envPath, envLine);
       }
-      console.log(chalk.green("\n✅ Configuration saved!"));
-      console.log(chalk.gray(`- Settings: ${configPath}`));
-      console.log(chalk.gray(`- API Key:  ${envPath} (Git-ignored)`));
+      note(
+        `Configuration saved!\n\n` +
+        `• Settings: ${chalk.cyan(configPath)}\n` +
+        `• API Key:  ${chalk.cyan(envPath)} (Git-ignored)`,
+        "Success"
+      );
     } catch (err) {
-      console.warn(chalk.yellow(`\n⚠️  Could not save API key to .env: ${err}`));
-      console.log(chalk.green("✅ Non-sensitive configuration saved to ") + chalk.gray(configPath));
+      note(
+        `Could not save API key to .env: ${err}\n` +
+        `Non-sensitive configuration saved to ${configPath}`,
+        "Warning"
+      );
     }
   }
 
-  console.log(chalk.gray("\nYou can now use ") + chalk.cyan("kamla chat") + chalk.gray(" to start.\n"));
+  outro(`You can now use ${chalk.cyan("kamla chat")} to start.`);
 }

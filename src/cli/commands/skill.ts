@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { SkillManager } from "../../core/skills.js";
 import chalk from "chalk";
 import ora from "ora";
+import { symbols, box, COLORS } from "../tui.js";
 
 export function skillCommand(): Command {
   const skill = new Command("skill");
@@ -16,15 +17,12 @@ export function skillCommand(): Command {
     .action(async () => {
       const skills = await manager.listSkills();
       if (skills.length === 0) {
-        console.log(chalk.yellow("No skills installed."));
+        console.log(`${symbols.warning} ${chalk.yellow("No skills installed.")}`);
         return;
       }
 
-      console.log(chalk.cyan("\nInstalled Skills:"));
-      skills.forEach((s) => {
-        console.log(`${chalk.green(s.name)}: ${s.description}`);
-      });
-      console.log();
+      const content = skills.map(s => `${chalk.green(s.name)}: ${s.description}`).join("\n");
+      console.log(box(content, "INSTALLED SKILLS", COLORS.secondary));
     });
 
   skill

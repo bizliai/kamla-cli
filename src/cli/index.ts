@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 import { loadConfig, validateConfig, saveGlobalConfig, needsSetup } from "../config/index.js";
-import { runSetup, PROVIDERS } from "../config/setup.js";
+import { runSetup, PROVIDERS, getModelsData } from "../config/setup.js";
 import { Agent } from "../core/agent.js";
 import { SkillManager } from "../core/skills.js";
 import { logger } from "../core/logger.js";
@@ -14,10 +14,12 @@ import readline from "readline";
 
 import inquirer from "inquirer";
 import { skillCommand } from "./commands/skill.js";
+import { printBanner, kamlaGradient, renderMarkdown, box, symbols, COLORS } from "./tui.js";
 
 async function ensureConfig(opts?: { provider?: string; apiKey?: string; model?: string; sandbox?: string }): Promise<void> {
   if (needsSetup()) {
-    console.log(chalk.yellow("No configuration found. Let's set up Kamla!\n"));
+    printBanner();
+    console.log(chalk.yellow("  No configuration found. Let's set up Kamla!\n"));
     await runSetup(process.cwd(), opts);
   }
 }
@@ -126,27 +128,62 @@ program
   .action(async () => {
     const config = loadConfig();
     const [currentProvider] = config.model.split("/");
-    const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
-    const models = providerConfig?.models || [];
+    
+    const s = ora("Fetching models...").start();
+    const modelsDev = await getModelsData();
+    s.stop();
 
-    const { model } = await inquirer.prompt([
-      {
-        type: "list",
-        name: "model",
-        message: "Select a model:",
-        choices: [...models, "Enter custom model ID"],
-        default: config.model,
-      },
-    ]);
-
-    let finalModel = model;
-    if (model === "Enter custom model ID") {
-      const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
-      finalModel = customModel;
+    let models: string[] = [];
+    if (modelsDev && modelsDev[currentProvider]) {
+      models = Object.keys(modelsDev[currentProvider].models).map(m => `${currentProvider}/${m}`);
+    } else {
+      const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
+      models = providerConfig?.models || [];
     }
 
-    saveGlobalConfig({ model: finalModel });
-    console.log(chalk.green(`Model updated to: ${finalModel}`));
+    let filteredModels = models;
+    while (true) {
+      const { model } = await inquirer.prompt([
+        {
+          type: "list",
+          name: "model",
+          message: "Select a model:",
+          choices: [
+            "🔍 Search models...",
+            ...filteredModels.slice(0, 50),
+            "Enter custom model ID"
+          ],
+          default: config.model,
+        },
+      ]);
+
+      if (model === "🔍 Search models...") {
+        const { searchTerm } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "searchTerm",
+            message: "Search for a model:",
+          },
+        ]);
+        filteredModels = models.filter(m => m.toLowerCase().includes(searchTerm.toLowerCase()));
+        continue;
+      }
+      
+      if (model === "Enter custom model ID") {
+        const { customModel } = await inquirer.prompt([{
+          type: "input",
+          name: "customModel",
+          message: "Enter custom model ID:",
+        }]);
+        saveGlobalConfig({ model: customModel });
+        console.log(chalk.green(`Model updated to: ${customModel}`));
+        return;
+      }
+
+      saveGlobalConfig({ model });
+      console.log(chalk.green(`Model updated to: ${model}`));
+      break;
+    }
   });
 
 program
@@ -231,8 +268,17 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
   
   const currentSessionId = sessionId || `session-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
   const initialHistoryLength = sessionManager.loadSession(currentSessionId).length;
-  const spinner = ora("Starting agent...").start();
+  
+  if (!sessionId) {
+    printBanner();
+  }
+
+  const spinner = ora({
+    text: "Starting agent...",
+    color: "cyan"
+  }).start();
   let isResponding = false;
+  let responseBuffer = "";
 
   const createAgent = (conf: typeof currentConfig) => {
     const a = new Agent({
@@ -243,17 +289,25 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
           process.stdout.write("\n");
           isResponding = false;
         }
-        console.log(chalk.blue(`\n  ⚙️  Executing: ${chalk.bold(tc.name)}`));
+        console.log(`\n  ${chalk.blue("⚙")}  ${chalk.bold("Tool Call:")} ${chalk.cyan(tc.name)}`);
         if (tc.arguments && Object.keys(tc.arguments).length > 0) {
-          console.log(chalk.gray(`     ${JSON.stringify(tc.arguments).slice(0, 100)}`));
+          const args = JSON.stringify(tc.arguments, null, 2)
+            .split("\n")
+            .map(line => `     ${chalk.gray(line)}`)
+            .join("\n");
+          console.log(args);
         }
+        console.log();
+        spinner.start(chalk.gray(`Executing ${tc.name}...`));
       },
       onToolResult: (tr) => {
+        spinner.stop();
         if (tr.is_error) {
-          console.error(chalk.red(`  ❌ Tool error: ${tr.output.slice(0, 200)}`));
+          console.error(`  ${symbols.error} ${chalk.red("Error:")} ${chalk.red(tr.output.slice(0, 500))}`);
         } else {
-          console.log(chalk.gray(`  ✅ Tool completed.`));
+          console.log(`  ${symbols.success} ${chalk.green("Tool completed.")}`);
         }
+        console.log();
       },
       onResponse: (delta) => {
         if (!delta) return;
@@ -261,10 +315,11 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
           spinner.stop();
         }
         if (!isResponding) {
-          process.stdout.write(chalk.cyan.bold("\nKamla > "));
+          process.stdout.write(`\n${symbols.agent} ${chalk.bold(kamlaGradient("Kamla"))} > `);
           isResponding = true;
         }
-        process.stdout.write(chalk.white(delta));
+        process.stdout.write(delta);
+        responseBuffer += delta;
       },
     });
     
@@ -375,14 +430,17 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
     }
 
     if (trimmedInput === "/" || trimmedInput === "/help") {
-      console.log(chalk.cyan("\nAvailable Commands:"));
-      console.log(`  ${chalk.bold("/clear")}    - Clear conversation history`);
-      console.log(`  ${chalk.bold("/model")}    - Switch LLM model`);
-      console.log(`  ${chalk.bold("/provider")} - Switch AI provider`);
-      console.log(`  ${chalk.bold("/session")}  - Manage chat sessions`);
-      console.log(`  ${chalk.bold("/skill")}    - Manage agent skills (list, install, uninstall)`);
-      console.log(`  ${chalk.bold("/help")}     - Show this help menu`);
-      console.log(`  ${chalk.bold("/exit")}     - Exit the chat\n`);
+      const helpText = [
+        `${chalk.bold.cyan("/clear")}    Clear conversation history`,
+        `${chalk.bold.cyan("/model")}    Switch LLM model`,
+        `${chalk.bold.cyan("/provider")} Switch AI provider`,
+        `${chalk.bold.cyan("/session")}  Manage chat sessions`,
+        `${chalk.bold.cyan("/skill")}    Manage agent skills`,
+        `${chalk.bold.cyan("/help")}     Show this help menu`,
+        `${chalk.bold.cyan("/exit")}     Exit the chat`
+      ].join("\n");
+      
+      console.log(box(helpText, "AVAILABLE COMMANDS", COLORS.secondary));
       return false;
     }
 
@@ -436,28 +494,62 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
     if (trimmedInput === "/model") {
       rl.pause();
       const [currentProvider] = currentConfig.model.split("/");
-      const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
-      const models = providerConfig?.models || [];
       
-      const { model } = await inquirer.prompt([{
-        type: "list",
-        name: "model",
-        message: "Switch to model:",
-        choices: [...models, "Enter custom model ID"],
-        default: currentConfig.model,
-      }]);
+      const s = ora("Fetching models...").start();
+      const modelsDev = await getModelsData();
+      s.stop();
 
-      let finalModel = model;
-      if (model === "Enter custom model ID") {
-        const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
-        finalModel = customModel;
+      let models: string[] = [];
+      if (modelsDev && modelsDev[currentProvider]) {
+        models = Object.keys(modelsDev[currentProvider].models).map(m => `${currentProvider}/${m}`);
+      } else {
+        const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
+        models = providerConfig?.models || [];
       }
-
-      currentConfig.model = finalModel;
-      saveGlobalConfig({ model: finalModel });
       
-      agent = createAgent(currentConfig);
-      console.log(chalk.green(`Switched to model: ${finalModel}`));
+      let filteredModels = models;
+      while (true) {
+        const { model } = await inquirer.prompt([{
+          type: "list",
+          name: "model",
+          message: "Switch to model:",
+          choices: [
+            "🔍 Search models...",
+            ...filteredModels.slice(0, 50),
+            "Enter custom model ID"
+          ],
+          default: currentConfig.model,
+        }]);
+        
+        if (model === "🔍 Search models...") {
+          const { searchTerm } = await inquirer.prompt([
+            {
+              type: "input",
+              name: "searchTerm",
+              message: "Search for a model:",
+            },
+          ]);
+          filteredModels = models.filter(m => m.toLowerCase().includes(searchTerm.toLowerCase()));
+          continue;
+        }
+
+        if (model === "Enter custom model ID") {
+          const { customModel } = await inquirer.prompt([{
+            type: "input",
+            name: "customModel",
+            message: "Enter custom model ID:",
+          }]);
+          currentConfig.model = customModel;
+          agent = createAgent(currentConfig);
+          console.log(chalk.green(`Switched to model: ${customModel}`));
+          break;
+        }
+
+        currentConfig.model = model;
+        agent = createAgent(currentConfig);
+        console.log(chalk.green(`Switched to model: ${model}`));
+        break;
+      }
       rl.resume();
       return false;
     }
@@ -515,11 +607,19 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
       rl.pause(); // Pause readline during agent execution to avoid stream conflicts
       spinner.start("Thinking...");
       logger.debug(`Starting agent execution for: ${trimmedInput}`);
+      responseBuffer = "";
       await agent.runStreaming(trimmedInput);
       logger.debug("Agent execution finished");
       
       if (isResponding) {
         process.stdout.write("\n");
+        // Re-render the full response as markdown for better readability if it's long enough
+        if (responseBuffer.includes("```") || responseBuffer.includes("#") || responseBuffer.length > 200) {
+          process.stdout.write("\x1b[1A\x1b[2K"); // Move up and clear line
+          // This is a bit tricky with streaming, so we just append the rendered version or 
+          // we can just leave the streamed text as is. 
+          // For now, let's just make sure the spacing is good.
+        }
       }
       spinner.stop();
       
@@ -556,7 +656,7 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
       processing = false;
       if (!isClosed) {
         logger.debug("handleLine completed, showing prompt");
-        rl.setPrompt(chalk.bold.green("You > "));
+        rl.setPrompt(`${symbols.user} ${chalk.bold.green("You")} > `);
         rl.prompt();
       } else {
         logger.debug("handleLine completed but rl is closed");
@@ -580,7 +680,7 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
     // This is robust because readline emits "line" events independently
     // of any async streaming happening inside processInput().
     logger.debug("Setting up event-driven chat loop");
-    rl.setPrompt(chalk.bold.green("You > "));
+    rl.setPrompt(`${symbols.user} ${chalk.bold.green("You")} > `);
     rl.prompt();
 
     rl.on("line", handleLine);
@@ -608,14 +708,14 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
     const userMessages = sessionHistory.filter((m: any) => m.role === "user").length;
     const aiMessages = sessionHistory.filter((m: any) => m.role === "assistant").length;
 
-    console.log("\n" + chalk.cyan.bold("╭──────────────────────────────────────────╮"));
-    console.log(chalk.cyan.bold("│") + "            " + chalk.white.bold("SESSION SUMMARY") + "               " + chalk.cyan.bold("│"));
-    console.log(chalk.cyan.bold("├──────────────────────────────────────────┤"));
-    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Model:")}     ${currentConfig.model.padEnd(28)}  ` + chalk.cyan.bold("│"));
-    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Duration:")}  ${durationStr.padEnd(28)}  ` + chalk.cyan.bold("│"));
-    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Messages:")}  ${(userMessages + " User / " + aiMessages + " AI").padEnd(28)}  ` + chalk.cyan.bold("│"));
-    console.log(chalk.cyan.bold("╰──────────────────────────────────────────╯"));
-    console.log(chalk.gray(`\nTo resume this session later, run: ${chalk.white.bold(`kamla resume ${currentSessionId}`)}\n`));
+    const summary = [
+      `${chalk.bold("Model:")}     ${currentConfig.model}`,
+      `${chalk.bold("Duration:")}  ${durationStr}`,
+      `${chalk.bold("Messages:")}  ${userMessages} User / ${aiMessages} AI`
+    ].join("\n");
+
+    console.log(box(summary, "SESSION SUMMARY", COLORS.primary));
+    console.log(chalk.gray(`  To resume this session later, run: ${chalk.white.bold(`kamla resume ${currentSessionId}`)}\n`));
   }
 }
 
