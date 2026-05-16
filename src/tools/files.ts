@@ -17,7 +17,7 @@ const readFileDefinition: ToolDefinition = {
     properties: {
       path: {
         type: "string",
-        description: "Path to the file to read (relative to current directory or absolute)",
+        description: "The path to the file to read (relative to the current directory).",
       },
     },
     required: ["path"],
@@ -85,8 +85,8 @@ export class ReadFileTool implements Tool {
   definition = readFileDefinition;
 
   async execute(args: Record<string, unknown>, config: AgentConfig): Promise<string> {
-    const filePath = args.path as string;
-    if (!filePath) return JSON.stringify({ error: "No path provided" });
+    const filePath = (args.path || args.name || args.filename || args.file) as string;
+    if (!filePath) return JSON.stringify({ error: "No path provided. Please specify the 'path' parameter." });
 
     const cwd = process.cwd();
     if (!isPathSafe(cwd, filePath)) {
@@ -94,7 +94,7 @@ export class ReadFileTool implements Tool {
     }
 
     try {
-      const resolvedPath = join(cwd, filePath);
+      const resolvedPath = resolve(cwd, filePath);
       if (!existsSync(resolvedPath)) {
         return JSON.stringify({ error: `File not found: ${filePath}` });
       }
@@ -126,7 +126,7 @@ export class WriteFileTool implements Tool {
     }
 
     try {
-      const resolvedPath = join(cwd, filePath);
+      const resolvedPath = resolve(cwd, filePath);
       writeFileSync(resolvedPath, content, "utf-8");
       return JSON.stringify({ success: true, path: filePath });
     } catch (e) {
@@ -157,7 +157,7 @@ export class EditFileTool implements Tool {
     }
 
     try {
-      const resolvedPath = join(cwd, filePath);
+      const resolvedPath = resolve(cwd, filePath);
       if (!existsSync(resolvedPath)) {
         return JSON.stringify({ error: `File not found: ${filePath}` });
       }
@@ -185,7 +185,7 @@ export class ListDirTool implements Tool {
       return JSON.stringify({ error: "Access denied: path outside working directory" });
     }
 
-    const resolvedPath = join(cwd, dirPath);
+    const resolvedPath = resolve(cwd, dirPath);
 
     try {
       if (!existsSync(resolvedPath)) {

@@ -4,6 +4,7 @@ import { ToolRegistry } from "./tools.js";
 import { ShellTool } from "../tools/shell.js";
 import { ReadFileTool, WriteFileTool, EditFileTool, ListDirTool } from "../tools/files.js";
 import { SkillManager, SkillTool } from "./skills.js";
+import { logger } from "./logger.js";
 
 
 
@@ -127,11 +128,17 @@ The current working directory is: ${process.cwd()}`;
       const response = await this.llm.chat(msgs, toolDefs);
       const { content, toolCalls } = response;
 
-      if (content) {
-        this.messages.push({ role: "assistant", content });
-        this.callbacks.onResponse?.(content);
+      if (content || toolCalls.length > 0) {
+        this.messages.push({
+          role: "assistant",
+          content: content || "",
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined
+        });
+        if (content) {
+          this.callbacks.onResponse?.(content);
+        }
 
-        if (toolCalls.length === 0) {
+        if (toolCalls.length === 0 && content) {
           return content;
         }
       }
@@ -193,20 +200,24 @@ The current working directory is: ${process.cwd()}`;
       let currentToolCalls: ToolCall[] = [];
 
       for await (const chunk of generator) {
-        if (chunk.done) break;
-
         if (chunk.delta) {
           fullContent += chunk.delta;
           this.callbacks.onResponse?.(chunk.delta);
         }
 
-        if (chunk.toolCalls.length > 0) {
+        if (chunk.toolCalls && chunk.toolCalls.length > 0) {
           currentToolCalls = chunk.toolCalls;
         }
+
+        if (chunk.done) break;
       }
 
-      if (fullContent) {
-        this.messages.push({ role: "assistant", content: fullContent });
+      if (fullContent || currentToolCalls.length > 0) {
+        this.messages.push({
+          role: "assistant",
+          content: fullContent,
+          tool_calls: currentToolCalls.length > 0 ? currentToolCalls : undefined
+        });
       }
 
       if (currentToolCalls.length > 0) {

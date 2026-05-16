@@ -83,8 +83,18 @@ export class LLMClient {
     messages: Message[],
     tools?: { name: string; description: string; parameters: Record<string, any> }[]
   ): Promise<{ content: string; toolCalls: ToolCall[] }> {
-    const coreMessages: any[] = messages.map((msg) => {
+    const systemMessages = messages.filter((m) => m.role === "system");
+    const otherMessages = messages.filter((m) => m.role !== "system");
+
+    const coreMessages: any[] = otherMessages.map((msg) => {
       if (msg.role === "tool") {
+        let resultValue: any = msg.content;
+        try {
+          if (msg.content.startsWith("{") || msg.content.startsWith("[")) {
+            resultValue = JSON.parse(msg.content);
+          }
+        } catch { /* not json */ }
+
         return {
           role: "tool",
           content: [
@@ -92,13 +102,36 @@ export class LLMClient {
               type: "tool-result",
               toolCallId: msg.tool_call_id!,
               toolName: msg.name!,
-              result: msg.content,
+              output: {
+                type: "json",
+                value: resultValue,
+              },
             },
           ],
         };
       }
+      if (msg.role === "assistant") {
+        const parts: any[] = [];
+        if (msg.content) {
+          parts.push({ type: "text", text: msg.content });
+        }
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            parts.push({
+              type: "tool-call",
+              toolCallId: tc.id,
+              toolName: tc.name,
+              input: tc.arguments,
+            });
+          }
+        }
+        return {
+          role: "assistant",
+          content: parts.length > 0 ? parts : "",
+        };
+      }
       return {
-        role: msg.role as "system" | "user" | "assistant",
+        role: "user",
         content: msg.content,
       };
     });
@@ -116,6 +149,7 @@ export class LLMClient {
     const model = this.getModel(this.config.model);
     const { text, toolCalls } = await generateText({
       model,
+      system: systemMessages.map((m) => m.content).join("\n"),
       messages: coreMessages,
       tools: aiTools,
       temperature: this.config.temperature,
@@ -135,8 +169,18 @@ export class LLMClient {
     messages: Message[],
     tools?: { name: string; description: string; parameters: Record<string, any> }[]
   ): AsyncGenerator<{ delta: string; toolCalls: ToolCall[]; done: boolean }> {
-    const coreMessages: any[] = messages.map((msg) => {
+    const systemMessages = messages.filter((m) => m.role === "system");
+    const otherMessages = messages.filter((m) => m.role !== "system");
+
+    const coreMessages: any[] = otherMessages.map((msg) => {
       if (msg.role === "tool") {
+        let resultValue: any = msg.content;
+        try {
+          if (msg.content.startsWith("{") || msg.content.startsWith("[")) {
+            resultValue = JSON.parse(msg.content);
+          }
+        } catch { /* not json */ }
+
         return {
           role: "tool",
           content: [
@@ -144,13 +188,36 @@ export class LLMClient {
               type: "tool-result",
               toolCallId: msg.tool_call_id!,
               toolName: msg.name!,
-              result: msg.content,
+              output: {
+                type: "json",
+                value: resultValue,
+              },
             },
           ],
         };
       }
+      if (msg.role === "assistant") {
+        const parts: any[] = [];
+        if (msg.content) {
+          parts.push({ type: "text", text: msg.content });
+        }
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            parts.push({
+              type: "tool-call",
+              toolCallId: tc.id,
+              toolName: tc.name,
+              input: tc.arguments,
+            });
+          }
+        }
+        return {
+          role: "assistant",
+          content: parts.length > 0 ? parts : "",
+        };
+      }
       return {
-        role: msg.role as "system" | "user" | "assistant",
+        role: "user",
         content: msg.content,
       };
     });
@@ -168,6 +235,7 @@ export class LLMClient {
     const model = this.getModel(this.config.model);
     const result = await streamText({
       model,
+      system: systemMessages.map((m) => m.content).join("\n"),
       messages: coreMessages,
       tools: aiTools,
       temperature: this.config.temperature,
@@ -177,7 +245,10 @@ export class LLMClient {
 
     for await (const part of result.fullStream) {
       if (part.type === "text-delta") {
-        yield { delta: (part as any).text || (part as any).textDelta, toolCalls: [], done: false };
+        const delta = (part as any).text || (part as any).textDelta || "";
+        if (delta) {
+          yield { delta, toolCalls: [], done: false };
+        }
       } else if (part.type === "tool-call") {
         const tc: ToolCall = {
           id: part.toolCallId,

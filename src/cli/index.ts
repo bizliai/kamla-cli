@@ -11,6 +11,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { stdin as input, stdout as output } from "process";
 import readline from "readline";
+
 import inquirer from "inquirer";
 import { skillCommand } from "./commands/skill.js";
 
@@ -62,6 +63,33 @@ program
 
     const initialMessage = message && message.length > 0 ? message.join(" ") : undefined;
     await startChat(config, initialMessage);
+  });
+
+program
+  .command("resume <sessionId>")
+  .description("Resume a previous chat session")
+  .option("-m, --model <model>", "Model to use")
+  .option("-s, --sandbox <mode>", "Sandbox mode (read-only, restricted, full)")
+  .action(async (sessionId, opts, cmd) => {
+    const parentOpts = cmd.parent?.opts();
+    await ensureConfig({
+      provider: parentOpts?.provider,
+      apiKey: parentOpts?.apiKey,
+      model: parentOpts?.model,
+      sandbox: parentOpts?.sandbox,
+    });
+    const config = loadConfig();
+    if (opts.model) config.model = opts.model;
+    if (opts.sandbox) config.sandbox = opts.sandbox as "read-only" | "restricted" | "full";
+
+    const errors = validateConfig(config);
+    if (errors.length > 0) {
+      console.error(chalk.red("Configuration errors:"));
+      errors.forEach((e) => console.error(`  - ${e}`));
+      process.exit(1);
+    }
+
+    await startChat(config, undefined, sessionId);
   });
 
 program
@@ -151,6 +179,20 @@ program
   });
 
 program
+  .command("sessions")
+  .description("List all saved chat sessions")
+  .action(() => {
+    const sessions = sessionManager.listSessions();
+    if (sessions.length === 0) {
+      console.log(chalk.yellow("No sessions found."));
+    } else {
+      console.log(chalk.cyan("\nSaved Sessions:"));
+      sessions.forEach((s) => console.log(`  - ${chalk.white(s)}`));
+      console.log(chalk.gray(`\nUse 'kamla resume <sessionId>' to continue a session.\n`));
+    }
+  });
+
+program
   .command("setup")
   .description("Run the setup wizard")
   .option("-p, --provider <provider>", "LLM provider")
@@ -174,15 +216,21 @@ program
 // Execute CLI
 (async () => {
   try {
+    logger.debug("CLI starting parseAsync");
     await program.parseAsync();
+    logger.debug("CLI parseAsync completed");
   } catch (err) {
     logger.error("CLI Execution error", err);
     process.exit(1);
   }
 })();
 
-async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?: string): Promise<void> {
+async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?: string, sessionId?: string): Promise<void> {
+  const sessionStartTime = Date.now();
   let currentConfig = { ...config };
+  
+  const currentSessionId = sessionId || `session-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
+  const initialHistoryLength = sessionManager.loadSession(currentSessionId).length;
   const spinner = ora("Starting agent...").start();
   let isResponding = false;
 
@@ -208,7 +256,10 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
         }
       },
       onResponse: (delta) => {
-        spinner.stop();
+        if (!delta) return;
+        if (spinner.isSpinning) {
+          spinner.stop();
+        }
         if (!isResponding) {
           process.stdout.write(chalk.cyan.bold("\nKamla > "));
           isResponding = true;
@@ -217,8 +268,8 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
       },
     });
     
-    // Load latest session
-    const history = sessionManager.loadSession("latest");
+    // Load session
+    const history = sessionManager.loadSession(currentSessionId);
     if (history.length > 0) {
       a.setHistory(history);
     }
@@ -228,6 +279,7 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
   let agent = createAgent(currentConfig);
 
   spinner.succeed(`Agent ready! (Model: ${chalk.cyan(currentConfig.model)})`);
+  console.log(chalk.gray(`Session ID: ${chalk.white(currentSessionId)}`));
   
   const skillManager = new SkillManager();
   const skillsCount = (await skillManager.listSkills()).length;
@@ -235,188 +287,336 @@ async function startChat(config: ReturnType<typeof loadConfig>, initialMessage?:
     console.log(chalk.gray(`Loaded ${skillsCount} custom skills.`));
   }
 
-  console.log(chalk.gray("Type your message. Use /model, /skill, /provider, /session, /clear or /exit.\n"));
+  console.log(chalk.gray("Type your message. Use /help to see all commands or /exit to quit.\n"));
 
-  const rl = readline.createInterface({ input, output });
+  const completions = ["/clear", "/model", "/provider", "/exit", "/quit", "/session", "/skill", "/help"];
+  const skillSubcommands = ["list", "install", "uninstall"];
 
-  return new Promise((resolve) => {
-    rl.on("close", () => {
-      logger.debug("Readline interface closed");
-      resolve();
-    });
+  const completer = (line: string) => {
+    if (line.startsWith("/skill ")) {
+      const sub = line.split(" ")[1] || "";
+      const hits = skillSubcommands.filter((s) => s.startsWith(sub));
+      return [hits.length ? hits.map(h => `/skill ${h}`) : skillSubcommands.map(h => `/skill ${h}`), line];
+    }
 
-    const ask = () => {
-      rl.question(chalk.bold.green("You > "), handleInput);
-    };
+    if (line.startsWith("/")) {
+      const hits = completions.filter((c) => c.startsWith(line));
+      return [hits.length ? hits : completions, line];
+    }
 
-    async function handleInput(inputStr: string) {
-      const trimmedInput = inputStr.trim();
-      logger.debug(`Received input: ${trimmedInput}`);
+    return [[], line];
+  };
+
+  // Keep stdin alive so the event loop doesn't exit between prompts
+  process.stdin.resume();
+
+  // Use the classic (non-promises) readline for event-driven line reading.
+  // readline/promises rl.question() in a while-loop breaks after streaming
+  // because the Vercel AI SDK's fullStream iteration causes Node.js to flush
+  // the input stream state, making the next rl.question() resolve instantly.
+  const rl = readline.createInterface({
+    input,
+    output,
+    completer,
+    terminal: true,
+  });
+
+  let isClosed = false;
+
+  rl.on("close", () => {
+    isClosed = true;
+    logger.debug("Readline interface closed");
+    process.stdin.pause();
+  });
+
+  let sigintCount = 0;
+  let sigintTimer: NodeJS.Timeout | null = null;
+
+  rl.on("SIGINT", () => {
+    logger.debug("Readline SIGINT received");
+    if (sigintCount === 0) {
+      sigintCount++;
+      // Move to a new line and show warning
+      process.stdout.write(chalk.yellow("\n(Press Ctrl+C again within 3 seconds to exit)\n"));
+      rl.prompt();
       
-      if (!trimmedInput) {
-        ask();
-        return;
+      sigintTimer = setTimeout(() => {
+        if (sigintCount === 1) {
+          sigintCount = 0;
+          // Clear the warning and the extra prompt line
+          // \x1b[2A moves up 2 lines, \x1b[J clears to end of screen
+          process.stdout.write("\x1b[2A\x1b[J");
+          rl.prompt();
+        }
+      }, 3000);
+    } else {
+      if (sigintTimer) clearTimeout(sigintTimer);
+      sigintCount = 0;
+      console.log(chalk.gray("\nExiting..."));
+      rl.close();
+    }
+  });
+
+  process.on("SIGINT", () => {
+    logger.debug("Process SIGINT received");
+  });
+
+  async function processInput(inputStr: string): Promise<boolean> {
+    if (inputStr === null || inputStr === undefined) {
+      logger.debug("Received null or undefined input, closing...");
+      return true;
+    }
+
+    const trimmedInput = inputStr.trim();
+    logger.debug(`Processing input: ${trimmedInput}`);
+    
+    if (!trimmedInput) {
+      return false;
+    }
+
+    if (trimmedInput === "/" || trimmedInput === "/help") {
+      console.log(chalk.cyan("\nAvailable Commands:"));
+      console.log(`  ${chalk.bold("/clear")}    - Clear conversation history`);
+      console.log(`  ${chalk.bold("/model")}    - Switch LLM model`);
+      console.log(`  ${chalk.bold("/provider")} - Switch AI provider`);
+      console.log(`  ${chalk.bold("/session")}  - Manage chat sessions`);
+      console.log(`  ${chalk.bold("/skill")}    - Manage agent skills (list, install, uninstall)`);
+      console.log(`  ${chalk.bold("/help")}     - Show this help menu`);
+      console.log(`  ${chalk.bold("/exit")}     - Exit the chat\n`);
+      return false;
+    }
+
+    if (trimmedInput === "/exit" || trimmedInput === "/quit") {
+      logger.debug("Exiting chat session via command");
+      return true;
+    }
+
+    if (trimmedInput === "/clear") {
+      console.clear();
+      agent.clearHistory();
+      sessionManager.saveSession("latest", []);
+      console.log(chalk.gray("Conversation history cleared.\n"));
+      return false;
+    }
+
+    if (trimmedInput === "/session") {
+      rl.pause();
+      console.log(chalk.cyan(`\nCurrent Session: ${chalk.white.bold(currentSessionId)}`));
+      const { action } = await inquirer.prompt([{
+        type: "list",
+        name: "action",
+        message: "Session management:",
+        choices: ["Save current session as...", "Load session", "List sessions", "Back"],
+      }]);
+
+      if (action === "Save current session as...") {
+        const { name } = await inquirer.prompt([{ type: "input", name: "name", message: "Enter session name:" }]);
+        sessionManager.saveSession(name, agent.getHistory());
+        console.log(chalk.green(`Session saved as ${name}`));
+      } else if (action === "Load session") {
+        const sessions = sessionManager.listSessions();
+        if (sessions.length === 0) {
+          console.log(chalk.yellow("No sessions found."));
+        } else {
+          const { name } = await inquirer.prompt([{ type: "list", name: "name", message: "Select session:", choices: sessions }]);
+          const history = sessionManager.loadSession(name);
+          agent.setHistory(history);
+          console.log(chalk.green(`Session ${name} loaded. (${history.length} messages)`));
+        }
+      } else if (action === "List sessions") {
+        const sessions = sessionManager.listSessions();
+        console.log(chalk.cyan("\nSaved Sessions:"));
+        sessions.forEach(s => console.log(`- ${s}`));
+        console.log();
+      }
+      rl.resume();
+      return false;
+    }
+
+    if (trimmedInput === "/model") {
+      rl.pause();
+      const [currentProvider] = currentConfig.model.split("/");
+      const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
+      const models = providerConfig?.models || [];
+      
+      const { model } = await inquirer.prompt([{
+        type: "list",
+        name: "model",
+        message: "Switch to model:",
+        choices: [...models, "Enter custom model ID"],
+        default: currentConfig.model,
+      }]);
+
+      let finalModel = model;
+      if (model === "Enter custom model ID") {
+        const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
+        finalModel = customModel;
       }
 
-      if (trimmedInput === "/exit" || trimmedInput === "/quit") {
-        logger.debug("Exiting chat session via command");
+      currentConfig.model = finalModel;
+      saveGlobalConfig({ model: finalModel });
+      
+      agent = createAgent(currentConfig);
+      console.log(chalk.green(`Switched to model: ${finalModel}`));
+      rl.resume();
+      return false;
+    }
+
+    if (trimmedInput === "/provider") {
+      rl.pause();
+      await runSetup(process.cwd(), { global: true });
+      currentConfig = loadConfig();
+      agent = createAgent(currentConfig);
+      console.log(chalk.green(`Switched to provider and model: ${currentConfig.model}`));
+      rl.resume();
+      return false;
+    }
+
+    if (trimmedInput.startsWith("/skill")) {
+      const parts = trimmedInput.split(" ");
+      const subCommand = parts[1];
+      const arg = parts[2];
+
+      if (subCommand === "list") {
+        const skills = await skillManager.listSkills();
+        if (skills.length === 0) {
+          console.log(chalk.yellow("No skills installed."));
+        } else {
+          console.log(chalk.cyan("\nInstalled Skills:"));
+          skills.forEach((s) => console.log(`${chalk.green(s.name)}: ${s.description}`));
+          console.log();
+        }
+      } else if (subCommand === "install" && arg) {
+        const s = ora(`Installing skill from ${arg}...`).start();
+        try {
+          await skillManager.installSkill(arg);
+          s.succeed(`Skill installed!`);
+          agent = createAgent(currentConfig);
+        } catch (e: any) {
+          s.fail(`Error: ${e.message}`);
+        }
+      } else if (subCommand === "uninstall" && arg) {
+        const s = ora(`Uninstalling skill ${arg}...`).start();
+        try {
+          await skillManager.uninstallSkill(arg);
+          s.succeed(`Skill uninstalled!`);
+          agent = createAgent(currentConfig);
+        } catch (e: any) {
+          s.fail(`Error: ${e.message}`);
+        }
+      } else {
+        console.log(chalk.yellow("Usage: /skill [list|install <url>|uninstall <name>]"));
+      }
+      return false;
+    }
+
+    try {
+      isResponding = false;
+      rl.pause(); // Pause readline during agent execution to avoid stream conflicts
+      spinner.start("Thinking...");
+      logger.debug(`Starting agent execution for: ${trimmedInput}`);
+      await agent.runStreaming(trimmedInput);
+      logger.debug("Agent execution finished");
+      
+      if (isResponding) {
+        process.stdout.write("\n");
+      }
+      spinner.stop();
+      
+      // Save current session
+      sessionManager.saveSession(currentSessionId, agent.getHistory());
+      sessionManager.saveSession("latest", agent.getHistory());
+    } catch (e: any) {
+      spinner.stop();
+      logger.error("Error during agent execution", e);
+      console.error(chalk.red(`\nError: ${e.message}`));
+    } finally {
+      rl.resume(); // Ensure readline is resumed
+    }
+    
+    return false;
+  }
+
+  logger.debug(`Starting chat. TTY: ${process.stdin.isTTY}`);
+
+  // Gate to prevent concurrent processing of lines
+  let processing = false;
+
+  async function handleLine(line: string) {
+    if (processing) return; // Ignore input while processing a previous message
+    processing = true;
+    try {
+      const shouldExit = await processInput(line);
+      if (shouldExit) {
+        logger.debug("Process input requested exit");
         rl.close();
         return;
       }
-
-      if (trimmedInput === "/clear") {
-        console.clear();
-        agent.clearHistory();
-        sessionManager.saveSession("latest", []);
-        console.log(chalk.gray("Conversation history cleared.\n"));
-        ask();
-        return;
+    } finally {
+      processing = false;
+      if (!isClosed) {
+        logger.debug("handleLine completed, showing prompt");
+        rl.setPrompt(chalk.bold.green("You > "));
+        rl.prompt();
+      } else {
+        logger.debug("handleLine completed but rl is closed");
       }
-
-      if (trimmedInput === "/session") {
-        rl.pause();
-        const { action } = await inquirer.prompt([{
-          type: "list",
-          name: "action",
-          message: "Session management:",
-          choices: ["Save current session", "Load session", "List sessions", "Back"],
-        }]);
-
-        if (action === "Save current session") {
-          const { name } = await inquirer.prompt([{ type: "input", name: "name", message: "Enter session name:" }]);
-          sessionManager.saveSession(name, agent.getHistory());
-          console.log(chalk.green(`Session saved as ${name}`));
-        } else if (action === "Load session") {
-          const sessions = sessionManager.listSessions();
-          if (sessions.length === 0) {
-            console.log(chalk.yellow("No sessions found."));
-          } else {
-            const { name } = await inquirer.prompt([{ type: "list", name: "name", message: "Select session:", choices: sessions }]);
-            const history = sessionManager.loadSession(name);
-            agent.setHistory(history);
-            console.log(chalk.green(`Session ${name} loaded. (${history.length} messages)`));
-          }
-        } else if (action === "List sessions") {
-          const sessions = sessionManager.listSessions();
-          console.log(chalk.cyan("\nSaved Sessions:"));
-          sessions.forEach(s => console.log(`- ${s}`));
-          console.log();
-        }
-        rl.resume();
-        ask();
-        return;
-      }
-
-      // ... other slash commands ...
-      if (trimmedInput === "/model") {
-        rl.pause();
-        const [currentProvider] = currentConfig.model.split("/");
-        const providerConfig = PROVIDERS.find(p => p.id === currentProvider);
-        const models = providerConfig?.models || [];
-        
-        const { model } = await inquirer.prompt([{
-          type: "list",
-          name: "model",
-          message: "Switch to model:",
-          choices: [...models, "Enter custom model ID"],
-          default: currentConfig.model,
-        }]);
-
-        let finalModel = model;
-        if (model === "Enter custom model ID") {
-          const { customModel } = await inquirer.prompt([{ type: "input", name: "customModel", message: "Enter model ID:" }]);
-          finalModel = customModel;
-        }
-
-        currentConfig.model = finalModel;
-        saveGlobalConfig({ model: finalModel });
-        
-        agent = createAgent(currentConfig);
-        console.log(chalk.green(`Switched to model: ${finalModel}`));
-        rl.resume();
-        ask();
-        return;
-      }
-
-      if (trimmedInput === "/provider") {
-        rl.pause();
-        await runSetup(process.cwd(), { global: true });
-        currentConfig = loadConfig();
-        agent = createAgent(currentConfig);
-        console.log(chalk.green(`Switched to provider and model: ${currentConfig.model}`));
-        rl.resume();
-        ask();
-        return;
-      }
-
-      if (trimmedInput.startsWith("/skill")) {
-        const parts = trimmedInput.split(" ");
-        const subCommand = parts[1];
-        const arg = parts[2];
-
-        if (subCommand === "list") {
-          const skills = await skillManager.listSkills();
-          if (skills.length === 0) {
-            console.log(chalk.yellow("No skills installed."));
-          } else {
-            console.log(chalk.cyan("\nInstalled Skills:"));
-            skills.forEach((s) => console.log(`${chalk.green(s.name)}: ${s.description}`));
-            console.log();
-          }
-        } else if (subCommand === "install" && arg) {
-          const s = ora(`Installing skill from ${arg}...`).start();
-          try {
-            await skillManager.installSkill(arg);
-            s.succeed(`Skill installed!`);
-            agent = createAgent(currentConfig);
-          } catch (e: any) {
-            s.fail(`Error: ${e.message}`);
-          }
-        } else if (subCommand === "uninstall" && arg) {
-          const s = ora(`Uninstalling skill ${arg}...`).start();
-          try {
-            await skillManager.uninstallSkill(arg);
-            s.succeed(`Skill uninstalled!`);
-            agent = createAgent(currentConfig);
-          } catch (e: any) {
-            s.fail(`Error: ${e.message}`);
-          }
-        } else {
-          console.log(chalk.yellow("Usage: /skill [list|install <url>|uninstall <name>]"));
-        }
-        ask();
-        return;
-      }
-
-      try {
-        isResponding = false;
-        spinner.start("Thinking...");
-        logger.debug(`Starting agent execution for: ${trimmedInput}`);
-        await agent.runStreaming(trimmedInput);
-        logger.debug("Agent execution finished");
-        if (isResponding) {
-          process.stdout.write("\n");
-        }
-        spinner.stop();
-        
-        // Save current session automatically
-        sessionManager.saveSession("latest", agent.getHistory());
-      } catch (e: any) {
-        spinner.stop();
-        logger.error("Error during agent execution", e);
-        console.error(chalk.red(`\nError: ${e.message}`));
-      }
-      
-      logger.debug("Calling ask() for next input");
-      ask();
     }
+  }
 
+  try {
+    // Handle initial message if provided (before entering the event loop)
     if (initialMessage) {
-      handleInput(initialMessage);
-    } else {
-      ask();
+      logger.debug(`Processing initial message: ${initialMessage}`);
+      const shouldExit = await processInput(initialMessage);
+      if (shouldExit) {
+        logger.debug("Initial message requested exit");
+        rl.close();
+        return;
+      }
     }
-  });
+
+    // Event-driven line handling — NOT a while+rl.question() loop.
+    // This is robust because readline emits "line" events independently
+    // of any async streaming happening inside processInput().
+    logger.debug("Setting up event-driven chat loop");
+    rl.setPrompt(chalk.bold.green("You > "));
+    rl.prompt();
+
+    rl.on("line", handleLine);
+
+    // Wait until the readline interface closes (user types /exit or Ctrl+D)
+    await new Promise<void>((resolve) => rl.once("close", resolve));
+  } catch (err) {
+    logger.error("Error in chat loop", err);
+  } finally {
+    logger.debug(`Chat session ending. isClosed=${isClosed}`);
+    if (!isClosed) {
+      try { rl.close(); } catch { /* already closed */ }
+    }
+    process.stdin.pause();
+
+    const durationMs = Date.now() - sessionStartTime;
+    const durationSec = Math.round(durationMs / 1000);
+    const mins = Math.floor(durationSec / 60);
+    const secs = durationSec % 60;
+    const durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    
+    // Calculate messages in this session
+    const history = agent.getHistory();
+    const sessionHistory = history.slice(initialHistoryLength);
+    const userMessages = sessionHistory.filter((m: any) => m.role === "user").length;
+    const aiMessages = sessionHistory.filter((m: any) => m.role === "assistant").length;
+
+    console.log("\n" + chalk.cyan.bold("╭──────────────────────────────────────────╮"));
+    console.log(chalk.cyan.bold("│") + "            " + chalk.white.bold("SESSION SUMMARY") + "               " + chalk.cyan.bold("│"));
+    console.log(chalk.cyan.bold("├──────────────────────────────────────────┤"));
+    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Model:")}     ${currentConfig.model.padEnd(28)}  ` + chalk.cyan.bold("│"));
+    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Duration:")}  ${durationStr.padEnd(28)}  ` + chalk.cyan.bold("│"));
+    console.log(chalk.cyan.bold("│") + `  ${chalk.bold("Messages:")}  ${(userMessages + " User / " + aiMessages + " AI").padEnd(28)}  ` + chalk.cyan.bold("│"));
+    console.log(chalk.cyan.bold("╰──────────────────────────────────────────╯"));
+    console.log(chalk.gray(`\nTo resume this session later, run: ${chalk.white.bold(`kamla resume ${currentSessionId}`)}\n`));
+  }
 }
 
 async function runTask(config: ReturnType<typeof loadConfig>, task: string, stream: boolean): Promise<void> {
