@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kamla | Autonomous AI Coding Agent</title>
+    <meta name="description" content="Kamla is an autonomous, AI-powered coding agent built for speed, safety, and productivity.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="#" class="nav-logo">
+                <img src="assets/logo.png" alt="Kamla Logo" id="logo-img">
+                <span>Kamla</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#quick-start">Quick Start</a></li>
+                <li><a href="#usage">Usage</a></li>
+                <li><a href="#security">Security</a></li>
+                <li>
+                    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle Theme">
+                        <span class="sun-icon">☀️</span>
+                        <span class="moon-icon">🌙</span>
+                    </button>
+                </li>
+                <li><a href="https://github.com/bizliai/kamla-cli" target="_blank" class="btn-github">GitHub</a></li>
+            </ul>
+            <button class="mobile-toggle" aria-label="Toggle Menu">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-overlay"></div>
+        <div class="container hero-content">
+            <h1 class="reveal">Build Faster with <span class="gradient-text">Kamla</span></h1>
+            <p class="reveal">The autonomous AI coding agent that plans, executes, and refactors your code directly from the terminal.</p>
+            <div class="hero-actions reveal">
+                <a href="#quick-start" class="btn btn-primary">Get Started</a>
+                <a href="#usage" class="btn btn-secondary">View Commands</a>
+            </div>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Why Choose Kamla?</h2>
+            <div class="feature-grid">
+                <div class="feature-card reveal">
+                    <div class="feature-icon">🧠</div>
+                    <h3>Autonomous Planning</h3>
+                    <p>Give high-level instructions, and Kamla handles the breakdown, file operations, and execution.</p>
+                </div>
+                <div class="feature-card reveal">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Multi-level Sandbox</h3>
+                    <p>Granular control with Read-only, Restricted, and Full access modes for maximum security.</p>
+                </div>
+                <div class="feature-card reveal">
+                    <div class="feature-icon">💬</div>
+                    <h3>Interactive Chat</h3>
+                    <p>Real-time pair programming interface that understands your entire codebase context.</p>
+                </div>
+                <div class="feature-card reveal">
+                    <div class="feature-icon">🚀</div>
+                    <h3>Provider Agnostic</h3>
+                    <p>Seamlessly switch between OpenAI, Anthropic, Google, and more via unified AI SDKs.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <main class="docs-container container">
+        <aside class="sidebar">
+            <ul class="sidebar-links">
+                <li><a href="#quick-start">Quick Start</a></li>
+                <li><a href="#usage">CLI Usage</a></li>
+                <li><a href="#configuration">Configuration</a></li>
+                <li><a href="#security">Security & Sandboxing</a></li>
+            </ul>
+        </aside>
+
+        <div class="content">
+            <section id="quick-start" class="doc-section reveal">
+                <h2>Quick Start</h2>
+                <p>Get up and running with Kamla in seconds.</p>
+                
+                <h3>Installation</h3>
+                <div class="code-block">
+                    <pre><code>npm install -g kamla-cli</code></pre>
+                    <button class="copy-btn">Copy</button>
+                </div>
+
+                <h3>Initialization</h3>
+                <p>Run the setup wizard to configure your preferred AI provider and API keys.</p>
+                <div class="code-block">
+                    <pre><code>kamla init</code></pre>
+                    <button class="copy-btn">Copy</button>
+                </div>
+            </section>
+
+            <section id="usage" class="doc-section reveal">
+                <h2>CLI Usage</h2>
+                <p>Kamla offers a powerful set of commands to streamline your workflow.</p>
+
+                <div class="command-item">
+                    <h4><code>kamla chat</code></h4>
+                    <p>Start an interactive chat session for pair programming.</p>
+                </div>
+
+                <div class="command-item">
+                    <h4><code>kamla run &lt;task&gt;</code></h4>
+                    <p>Execute a specific task autonomously. Example:</p>
+                    <div class="code-block">
+                        <pre><code>kamla run "Refactor src/utils.ts to use arrow functions"</code></pre>
+                        <button class="copy-btn">Copy</button>
+                    </div>
+                </div>
+
+                <div class="command-item">
+                    <h4><code>kamla config</code></h4>
+                    <p>Display your current project configuration.</p>
+                </div>
+
+                <h3>Global Options</h3>
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th>Option</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>-p, --provider</code></td>
+                            <td>Set the LLM provider (openai, google, etc.)</td>
+                        </tr>
+                        <tr>
+                            <td><code>-m, --model</code></td>
+                            <td>Specify a specific model to use</td>
+                        </tr>
+                        <tr>
+                            <td><code>-s, --sandbox</code></td>
+                            <td>Set sandbox mode (read-only, restricted, full)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section id="configuration" class="doc-section reveal">
+                <h2>Configuration</h2>
+                <p>Kamla uses a <code>kamla.config.json</code> file to store project-specific settings.</p>
+                <div class="code-block">
+                    <pre><code>{
+  "model": "gpt-4-turbo",
+  "sandbox": "restricted",
+  "approveCommands": ["npm test"],
+  "blockCommands": ["rm -rf"]
+}</code></pre>
+                    <button class="copy-btn">Copy</button>
+                </div>
+            </section>
+
+            <section id="security" class="doc-section reveal">
+                <h2>Security & Sandboxing</h2>
+                <p>Security is baked into Kamla's core. Choose the right sandbox mode for your needs.</p>
+                
+                <div class="sandbox-grid">
+                    <div class="sandbox-card">
+                        <h5>Read-Only</h5>
+                        <p>The agent can only read files. Best for exploration and analysis.</p>
+                    </div>
+                    <div class="sandbox-card">
+                        <h5>Restricted</h5>
+                        <p>Modifications allowed, but sensitive commands require manual approval.</p>
+                    </div>
+                    <div class="sandbox-card">
+                        <h5>Full</h5>
+                        <p>Unrestricted access. Use only in trusted environments.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <img src="assets/logo.png" alt="Kamla Logo">
+                    <span>Kamla</span>
+                </div>
+                <p>&copy; 2024 Kamla Contributors. Released under the MIT License.</p>
+                <div class="footer-links">
+                    <a href="https://github.com/bizliai/kamla-cli">GitHub</a>
+                    <a href="https://npmjs.com/package/kamla-cli">NPM</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
