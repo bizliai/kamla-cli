@@ -205,6 +205,10 @@ The current working directory is: ${process.cwd()}`;
         }
       }
 
+      if (fullContent) {
+        this.messages.push({ role: "assistant", content: fullContent });
+      }
+
       if (currentToolCalls.length > 0) {
         for (const toolCall of currentToolCalls) {
           this.callbacks.onToolCall?.(toolCall);
@@ -236,8 +240,7 @@ The current working directory is: ${process.cwd()}`;
             name: toolCall.name,
           });
         }
-      } else if (fullContent) {
-        this.messages.push({ role: "assistant", content: fullContent });
+      } else {
         return fullContent;
       }
 
@@ -249,6 +252,10 @@ The current working directory is: ${process.cwd()}`;
 
   getHistory(): Message[] {
     return [...this.messages];
+  }
+
+  setHistory(messages: Message[]): void {
+    this.messages = messages;
   }
 
   clearHistory(): void {

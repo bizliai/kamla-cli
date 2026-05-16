@@ -62,7 +62,8 @@ export class LLMClient {
       case "replicate":
         return (replicate as any).model(modelName);
       case "opencode":
-        return createOpenAI({
+        return createOpenAICompatible({
+          name: "opencode",
           apiKey: apiKey || this.config.apiKey,
           baseURL: baseURL || "https://opencode.ai/zen/v1",
         })(modelName);
