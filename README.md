@@ -1,83 +1,136 @@
-# Kamla
+<p align="center">
+  <img src="assets/logo.png" alt="Kamla Logo" width="200" />
+</p>
 
-Autonomous code agent powered by LLMs
+# Kamla 🤖
 
-## Installation
+[![npm version](https://img.shields.io/npm/v/kamla.svg?style=flat-square)](https://www.npmjs.com/package/kamla)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen?style=flat-square)](https://plusemon.github.io/kamla/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.0-green.svg?style=flat-square)](https://nodejs.org/)
+
+**Kamla** is an autonomous, AI-powered coding agent designed to help you build, debug, and refactor code directly from your terminal. Built with safety and speed in mind, Kamla leverages Large Language Models (LLMs) to perform complex tasks across your filesystem while providing a secure sandbox environment.
+
+---
+
+## 📚 Documentation
+
+View the full documentation at **[plusemon.github.io/kamla](https://plusemon.github.io/kamla/)**.
+
+---
+
+## ✨ Features
+
+- 🧠 **Autonomous Task Execution**: Give a high-level instruction, and Kamla will plan and execute it.
+- 💬 **Interactive Chat**: Pair-program with the agent in a real-time terminal interface.
+- 🛡️ **Multi-level Sandboxing**: Control what the agent can do with `read-only`, `restricted`, and `full` access modes.
+- ⚙️ **Provider Agnostic**: Support for OpenAI, OpenCode, and other LLM providers.
+- 🚀 **Built for Developers**: Fast, lightweight, and written in TypeScript.
+- 🔒 **Security First**: Configurable command blocklists and manual approval workflows.
+
+---
+
+## 🚀 Quick Start
+
+### Installation
+
+Install Kamla globally via npm:
 
 ```bash
 npm install -g kamla
 ```
 
-## Usage
+### Initial Setup
 
-### Interactive Chat
-
-Start an interactive chat session with the agent:
-
-```bash
-kamla chat
-```
-
-### Run Autonomous Task
-
-Run a task autonomously:
-
-```bash
-kamla run "Create a new file called hello.txt with 'Hello World'"
-```
-
-### Configuration
-
-Show current configuration:
-
-```bash
-kamla config
-```
-
-### Setup
-
-Run the setup wizard to configure your LLM provider:
-
-```bash
-kamla setup
-```
-
-Or use the `init` command:
+Initialize Kamla and configure your LLM provider:
 
 ```bash
 kamla init
 ```
 
-## Options
+Alternatively, you can set environment variables:
 
-Global options that can be used with any command:
+```bash
+export OPENAI_API_KEY='your-key-here'
+```
 
-- `-p, --provider <provider>` - LLM provider (openai, opencode)
-- `-k, --api-key <key>` - API key
-- `-m, --model <model>` - Model name
-- `-s, --sandbox <mode>` - Sandbox mode (read-only, restricted, full)
+---
 
-### Sandbox Modes
+## 🛠️ Usage
 
-- `read-only` - Can only read files, cannot execute commands
-- `restricted` - Can read and write files, but with limited command execution
-- `full` - Full access to file operations and shell commands
+### 💬 Interactive Mode
+Collaborate with Kamla in a continuous session. This is perfect for complex debugging or architectural discussions.
 
-## Commands
+```bash
+kamla chat
+```
 
-- `chat` - Start an interactive chat session
-- `run <task>` - Run a task autonomously
-- `init` - Run the setup wizard
-- `config` - Show current configuration
-- `setup` - Run the setup wizard
+### ⚡ Run a Task
+Execute a specific task autonomously and exit when finished.
 
-## Configuration
+```bash
+kamla run "Refactor all exported functions in src/utils.ts to use arrow functions"
+```
 
-Kamla uses `kamla.config.json` in the project root for configuration. You can also set environment variables:
+### 🔍 Configuration Management
+View or update your current settings.
 
-- `OPENAI_API_KEY` - Your OpenAI API key
-- `OPENCODE_API_KEY` - Your OpenCode API key
+```bash
+kamla config
+```
 
-## License
+---
 
-MIT
+## 🛡️ Sandbox & Security
+
+Kamla provides granular control over the agent's environment to ensure your system remains safe.
+
+| Mode | Capabilities | Description |
+| :--- | :--- | :--- |
+| `read-only` | 👀 Read | Agent can only read files. No modifications or command execution. |
+| `restricted` | ✍️ Read/Write | Agent can modify files but requires approval for most shell commands. |
+| `full` | 🔥 Unlimited | Full access to filesystem and terminal execution. Use with caution. |
+
+### Command Filtering
+Configure `kamla.config.json` to block specific dangerous commands (e.g., `rm -rf /`) or require explicit approval for sensitive operations.
+
+---
+
+## ⚙️ Configuration
+
+Kamla uses a `kamla.config.json` file in your project root or home directory.
+
+```json
+{
+  "model": "minimax-m2.5-free",
+  "apiEndpoint": "https://opencode.ai/zen/v1",
+  "sandbox": "restricted",
+  "approveCommands": ["npm test", "git commit"],
+  "blockCommands": ["rm -rf", "dd"]
+}
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+
+<p align="center">
+  Built with ❤️ by the Kamla Contributors
+</p>
