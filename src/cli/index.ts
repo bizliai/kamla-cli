@@ -4,11 +4,15 @@ import { Command } from "commander";
 import { loadConfig, validateConfig, saveGlobalConfig, needsSetup } from "../config/index.js";
 import { runSetup, PROVIDERS } from "../config/setup.js";
 import { Agent } from "../core/agent.js";
+import { SkillManager } from "../core/skills.js";
 import chalk from "chalk";
+
 import ora from "ora";
 import { stdin as input, stdout as output } from "process";
 import readline from "readline";
 import inquirer from "inquirer";
+import { skillCommand } from "./commands/skill.js";
+
 
 async function ensureConfig(opts?: { provider?: string; apiKey?: string; model?: string; sandbox?: string }): Promise<void> {
   if (needsSetup()) {
@@ -29,6 +33,9 @@ program
   .option("-k, --api-key <key>", "API key")
   .option("-m, --model <model>", "Model name (e.g. provider/model)")
   .option("-s, --sandbox <mode>", "Sandbox mode (read-only, restricted, full)");
+
+program.addCommand(skillCommand());
+
 
 program
   .command("chat")
@@ -180,9 +187,17 @@ async function startChat(config: ReturnType<typeof loadConfig>): Promise<void> {
     },
   });
 
-  spinner.succeed(`Agent ready! (Model: ${chalk.cyan(currentConfig.model)})`);
 
-  console.log(chalk.gray("Type your message. Use /model to switch model, /provider for setup, or /exit to quit.\n"));
+  spinner.succeed(`Agent ready! (Model: ${chalk.cyan(currentConfig.model)})`);
+  
+  const skillManager = new SkillManager();
+  const skillsCount = (await skillManager.listSkills()).length;
+  if (skillsCount > 0) {
+    console.log(chalk.gray(`Loaded ${skillsCount} custom skills.`));
+  }
+
+  console.log(chalk.gray("Type your message. Use /model, /skill, /provider, or /exit.\n"));
+
 
   const rl = readline.createInterface({ input, output });
 
@@ -240,6 +255,46 @@ async function startChat(config: ReturnType<typeof loadConfig>): Promise<void> {
         ask();
         return;
       }
+
+      if (trimmedInput.startsWith("/skill")) {
+        const parts = trimmedInput.split(" ");
+        const subCommand = parts[1];
+        const arg = parts[2];
+
+        if (subCommand === "list") {
+          const skills = await skillManager.listSkills();
+          if (skills.length === 0) {
+            console.log(chalk.yellow("No skills installed."));
+          } else {
+            console.log(chalk.cyan("\nInstalled Skills:"));
+            skills.forEach((s) => console.log(`${chalk.green(s.name)}: ${s.description}`));
+            console.log();
+          }
+        } else if (subCommand === "install" && arg) {
+          const s = ora(`Installing skill from ${arg}...`).start();
+          try {
+            await skillManager.installSkill(arg);
+            s.succeed(`Skill installed!`);
+            agent = new Agent({ config: currentConfig }); // Reload skills
+          } catch (e: any) {
+            s.fail(`Error: ${e.message}`);
+          }
+        } else if (subCommand === "uninstall" && arg) {
+          const s = ora(`Uninstalling skill ${arg}...`).start();
+          try {
+            await skillManager.uninstallSkill(arg);
+            s.succeed(`Skill uninstalled!`);
+            agent = new Agent({ config: currentConfig }); // Reload skills
+          } catch (e: any) {
+            s.fail(`Error: ${e.message}`);
+          }
+        } else {
+          console.log(chalk.yellow("Usage: /skill [list|install <url>|uninstall <name>]"));
+        }
+        ask();
+        return;
+      }
+
 
       const response = await agent.run(trimmedInput);
       console.log(chalk.white(response));

@@ -1,0 +1,15 @@
+{
+  "name": "weather",
+  "description": "Get current weather for a city",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": {
+        "type": "string",
+        "description": "The city to get weather for"
+      }
+    },
+    "required": ["city"]
+  },
+  "command": "bash {{skillDir}}/get_weather.sh {{city}}"
+}

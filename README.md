@@ -25,7 +25,9 @@ View the full documentation at **[bizliai.github.io/kamla-cli](https://bizliai.g
 - 🧠 **Autonomous Task Execution**: Give a high-level instruction, and Kamla will plan and execute it.
 - 💬 **Interactive Chat**: Pair-program with the agent in a real-time terminal interface.
 - 🛡️ **Multi-level Sandboxing**: Control what the agent can do with `read-only`, `restricted`, and `full` access modes.
+- 🛠️ **Custom Skills**: Extend the agent's capabilities with dynamic tools installed via Git or local scripts.
 - ⚙️ **Provider Agnostic**: Support for OpenAI, OpenCode, and other LLM providers.
+
 - 🚀 **Built for Developers**: Fast, lightweight, and written in TypeScript.
 - 🔒 **Security First**: Configurable command blocklists and manual approval workflows.
 
@@ -79,6 +81,23 @@ View or update your current settings.
 ```bash
 kamla config
 ```
+
+### 🛠️ Skills Management
+Extend Kamla's capabilities by installing new skills.
+
+```bash
+# List installed skills
+kamla skill list
+
+# Install a skill from a Git repository
+kamla skill install https://github.com/user/my-skill.git
+
+# Install skills from the local installer
+./skills.sh
+```
+
+Within the chat, you can also use `/skill` to manage tools dynamically.
+
 
 ---
 

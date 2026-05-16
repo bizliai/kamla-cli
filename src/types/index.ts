@@ -63,3 +63,15 @@ export interface LogEntry {
   timestamp: number;
   data?: unknown;
 }
+
+export interface SkillManifest {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, any>;
+    required?: string[];
+  };
+  command?: string;
+  instructions?: string;
+}

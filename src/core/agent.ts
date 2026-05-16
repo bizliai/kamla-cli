@@ -3,6 +3,9 @@ import { LLMClient } from "../llm/client.js";
 import { ToolRegistry } from "./tools.js";
 import { ShellTool } from "../tools/shell.js";
 import { ReadFileTool, WriteFileTool, EditFileTool, ListDirTool } from "../tools/files.js";
+import { SkillManager, SkillTool } from "./skills.js";
+
+
 
 export interface AgentOptions {
   config: AgentConfig;
@@ -19,6 +22,10 @@ export class Agent {
   private registry: ToolRegistry;
   private messages: Message[] = [];
   private systemPrompt: string;
+  private skillManager: SkillManager;
+  private initialized: Promise<void>;
+
+
   private callbacks: {
     onToolCall?: (toolCall: ToolCall) => void;
     onToolResult?: (result: ToolResult) => void;
@@ -30,24 +37,37 @@ export class Agent {
     this.config = options.config;
     this.llm = new LLMClient(this.config);
     this.registry = new ToolRegistry();
+    this.skillManager = new SkillManager();
     this.systemPrompt = options.systemPrompt || this.getDefaultSystemPrompt();
+
     this.callbacks = {
       onToolCall: options.onToolCall,
       onToolResult: options.onToolResult,
       onThinking: options.onThinking,
       onResponse: options.onResponse,
     };
-
-    this.registerTools();
+    this.initialized = this.init();
   }
 
-  private registerTools(): void {
+
+  private async init(): Promise<void> {
+    await this.registerTools();
+  }
+
+  private async registerTools(): Promise<void> {
+
     this.registry.register(new ShellTool());
     this.registry.register(new ReadFileTool());
     this.registry.register(new WriteFileTool());
     this.registry.register(new EditFileTool());
     this.registry.register(new ListDirTool());
+
+    const skills = await this.skillManager.loadSkills();
+    for (const skill of skills) {
+      this.registry.register(skill);
+    }
   }
+
 
   private getDefaultSystemPrompt(): string {
     return `You are an autonomous coding agent. Your job is to help the user accomplish programming tasks.
@@ -70,16 +90,31 @@ Guidelines:
 The current working directory is: ${process.cwd()}`;
   }
 
+  private getSkillInstructions(): string {
+    const tools = this.registry.getTools();
+    let instructions = "";
+    for (const tool of tools) {
+      if (tool instanceof SkillTool && tool.instructions) {
+        instructions += `\n\n--- Skill: ${tool.definition.name} ---\n${tool.instructions}`;
+      }
+    }
+    return instructions;
+  }
+
   private buildMessages(): Message[] {
+    const skillInstructions = this.getSkillInstructions();
     const msgs: Message[] = [
-      { role: "system", content: this.systemPrompt },
+      { role: "system", content: this.systemPrompt + skillInstructions },
       ...this.messages,
     ];
     return msgs;
   }
 
+
   async run(userInput: string): Promise<string> {
+    await this.initialized;
     this.messages.push({ role: "user", content: userInput });
+
 
     let turnCount = 0;
     const maxTurns = this.config.maxTurns;
@@ -141,7 +176,9 @@ The current working directory is: ${process.cwd()}`;
   }
 
   async runStreaming(userInput: string): Promise<string> {
+    await this.initialized;
     this.messages.push({ role: "user", content: userInput });
+
 
     let turnCount = 0;
     const maxTurns = this.config.maxTurns;

@@ -21,6 +21,11 @@ export class ToolRegistry {
     return Array.from(this.tools.values()).map((t) => t.definition);
   }
 
+  getTools(): Tool[] {
+    return Array.from(this.tools.values());
+  }
+
+
   async execute(toolCall: ToolCall, config: AgentConfig): Promise<string> {
     const tool = this.get(toolCall.name);
     if (!tool) {

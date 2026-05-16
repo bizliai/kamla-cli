@@ -61,6 +61,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli/index.js",
+    "cli": "node dist/cli/index.js",
     "dev": "tsx src/cli/index.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "typecheck": "tsc --noEmit"
